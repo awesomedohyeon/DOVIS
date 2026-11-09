@@ -17,7 +17,7 @@
   --accent:#3B5BDB;
   --bg:#F6F7F9; --card:#FFFFFF; --text:#17181A; --sub:#5F6368; --sub2:#4A4F57;
   --line:#E6E8EC; --line2:#EEF0F3; --chip:#F1F2F4; --input:#F6F7F9; --border:#D5D8DE;
-  --drum:#6741D9; --work:#C2410C; --etc:#0B7285; --ok:#2B8A3E; --okbg:#EBF7EE; --okt:#1E5631; --danger:#E03131;
+  --drum:#6741D9; --work:#C2410C; --etc:#0B7285; --friend:#D6336C; --ok:#2B8A3E; --okbg:#EBF7EE; --okt:#1E5631; --danger:#E03131;
   --shadow:0 1px 2px rgba(0,0,0,.05);
   --tint:color-mix(in srgb, var(--accent) 10%, var(--card));
   --tint2:color-mix(in srgb, var(--accent) 16%, var(--card));
@@ -190,7 +190,7 @@ function nowInfo(){const d=new Date();return {date:ymd(d),min:d.getHours()*60+d.
 /* ================= 시드 데이터 ================= */
 const SEM_START='2026-09-01', SEM_END='2026-12-31';
 const PLACES={home:'집',school:'학교',student:'학생회관',gym:'헬스장',tutor:'과외',academy:'학원',practice:'드럼 연습실',seoul:'서울',other:'기타'};
-const CATS={class:'수업',drum:'드럼',work:'과외·학원',etc:'기타'};
+const CATS={class:'수업',drum:'드럼',work:'과외·학원',friend:'친구·약속',etc:'기타'};
 const TYPES={study:'과제·공부',practice:'드럼 연습',workout:'운동',etc:'기타'};
 const TYPE_PLACE={study:'school',practice:'practice',workout:'gym',etc:'school'};
 function seed(){
@@ -253,7 +253,7 @@ function seed(){
 const LS_KEY='dovis-state-v1';
 let S=null;
 function loadLocal(){try{const raw=localStorage.getItem(LS_KEY);if(raw)return JSON.parse(raw);}catch(e){}return null;}
-const VERSION='0.0.7';
+const VERSION='0.0.9';
 const STANDALONE=!(window.claude&&window.claude.use);
 function emptySeed(){const x=seed();x.fixed=[];x.events=[];x.skips={};x.confirm={};x.feel={};x.feelDow={};x.feelRef={};x.recurring={hyunsaFrom:'2099-01-05'};x.chat=[{id:'m0',who:'bot',text:'안녕! 나 DOVIS야.\n설정 → 데이터 → "백업 붙여넣기"로 기존 일정을 옮기거나, 여기서 할 일과 일정을 말해줘.'}];x.v=5;return x;}
 S=loadLocal()||(STANDALONE&&location.protocol!=='file:'&&!/claude/.test(location.hostname)?emptySeed():seed());
@@ -524,7 +524,7 @@ const stIcon=(st,c)=>{
   if(st==='need')return '<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="'+c+'" stroke-width="1.8"/></svg>';
   return '<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="#ADB5BD" stroke-width="1.4" stroke-dasharray="2 2"/></svg>';
 };
-function catColor(cat){return cat==='drum'?'var(--drum)':cat==='work'?'var(--work)':cat==='etc'?'var(--etc)':'var(--accent)';}
+function catColor(cat){return cat==='friend'?'var(--friend)':cat==='drum'?'var(--drum)':cat==='work'?'var(--work)':cat==='etc'?'var(--etc)':'var(--accent)';}
 function taskColor(e){return e.type==='practice'?'var(--drum)':e.type==='workout'?'var(--ok)':e.type==='etc'?'var(--etc)':'var(--accent)';}
 function taskState(e){
   if(e.status==='done')return 'done';if(e.status==='miss')return 'miss';
@@ -943,7 +943,7 @@ function renderWeek(){
   }).join('');
   const lab=labQuestions().filter(e=>e.date>=m&&e.date<=addDays(m,6));
   return '<div class="top" style="padding-bottom:8px"><div><div class="k">'+md(m)+' – '+md(addDays(m,6))+'</div><h1>'+(parseYmd(m).getMonth()+1)+'월 '+Math.ceil(parseYmd(m).getDate()/7)+'주차</h1></div><div class="row"><button class="iconbtn" data-a="wk" data-n="-7" aria-label="이전 주">'+I.left+'</button>'+(m!==weekStart(n.date)?'<button class="btn sm ghost" data-a="wk" data-n="0">이번 주</button>':'')+'<button class="iconbtn" data-a="wk" data-n="7" aria-label="다음 주">'+I.right+'</button></div></div>'+
-  '<div style="padding:0 16px 8px" class="legend"><span class="row"><span class="dot" style="background:var(--accent)"></span>수업</span><span class="row"><span class="dot" style="background:var(--drum)"></span>드럼</span><span class="row"><span class="dot" style="background:var(--work)"></span>과외·학원</span><span class="row"><span class="dot" style="background:var(--etc)"></span>기타</span><span class="row"><span class="dot" style="background:var(--card);border:1.5px solid var(--sub)"></span>할 일(체크)</span></div>'+
+  '<div style="padding:0 16px 8px" class="legend"><span class="row"><span class="dot" style="background:var(--accent)"></span>수업</span><span class="row"><span class="dot" style="background:var(--drum)"></span>드럼</span><span class="row"><span class="dot" style="background:var(--work)"></span>과외·학원</span><span class="row"><span class="dot" style="background:var(--friend)"></span>친구·약속</span><span class="row"><span class="dot" style="background:var(--etc)"></span>기타</span><span class="row"><span class="dot" style="background:var(--card);border:1.5px solid var(--sub)"></span>할 일(체크)</span></div>'+
   banner+(lab.length?'<div style="margin:0 12px 8px;background:var(--card);border:1.5px dashed var(--accent);border-radius:12px;padding:8px 8px 8px 14px;display:flex;justify-content:space-between;align-items:center;gap:8px"><div style="font-size:13px">'+weekTag(lab[0].date)+' '+esc(lab[0].title)+' 있어?</div><div class="row"><button class="btn sm" data-a="conf" data-key="'+lab[0].date+':'+lab[0].fid+'" data-v="on">있음</button><button class="btn sm ghost" data-a="conf" data-key="'+lab[0].date+':'+lab[0].fid+'" data-v="off">휴강</button><button class="btn sm ghost" data-a="conf" data-key="'+lab[0].date+':'+lab[0].fid+'" data-v="unsure">모름</button></div></div>':'')+
   '<div class="wk-head"><div></div>'+head+'</div><div class="wk-all"><div style="font-size:9px;color:var(--sub);display:flex;align-items:center">종일</div>'+all+'</div>'+
   '<div class="scroll" style="padding:6px 6px 10px;gap:0"><div data-scrollto="'+scrollTo+'"></div><div class="wk-grid"><div class="wk-hr" style="height:'+H+'px">'+hours+'</div>'+cols+'</div><div style="margin-top:10px;background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding-top:8px"><div style="padding:0 14px 4px;font-size:13px;font-weight:700">아침 · 운동</div>'+habitRows(days)+'</div></div>';
@@ -1447,14 +1447,15 @@ function scheduleWorkouts(weekStart){
   for(let i=0;i<5;i++){const d=addDays(weekStart,i);if(d<n.date)continue;if(blockedDay(d))continue;if(S.events.some(e=>e.date===d&&e.type==='workout'))continue;list.push({title:'운동',short:'운동',durationMin:90,deadline:d,from:d,type:'workout',allowSplit:false,place:'gym'});}
   return list;
 }
-async function handleChat(text){
+async function handleChat(text,quick){
   text=text.trim();if(!text)return;
   S.chat.push({id:'m'+uid(),who:'me',text});ui.draft='';ui.prop=null;ui.busy=true;ui.scrollBottom=true;commit();
   try{
-    const local=localIntent(text);
-    if(local&&local.handled){ui.busy=false;ui.scrollBottom=true;commit();return;}
+    // 아래 버튼(빈 시간·남은 일정·운동 잡기)은 정확한 계산이라 바로 처리. 직접 쓴 말은 항상 AI가 먼저.
     const sample=ui.ai===false?null:await getSample();
+    if(quick||!sample){const local=localIntent(text);if(local&&local.handled){ui.busy=false;ui.scrollBottom=true;commit();return;}}
     if(!sample){
+      const local=localIntent(text,true);
       if(local&&local.task){ui.busy=false;openPropFor(local.task,local.reply);return;}
       botSay('아직 AI가 연결 안 돼 있어서 그 말은 이해 못 했어. 설정 → AI 연결에 Gemini 키를 넣으면 자유롭게 말할 수 있어! 지금은 "약분 보고서 3시간, 금요일까지"처럼 말하거나 위의 직접 입력을 써줘.');
       ui.busy=false;ui.scrollBottom=true;commit();return;
@@ -1464,6 +1465,9 @@ async function handleChat(text){
     applyAI(res,text);
   }catch(err){
     ui.busy=false;
+    const pre=S.chat.length;
+    const lh=localIntent(text);
+    if(lh&&lh.handled){const m=S.chat[S.chat.length-1];if(S.chat.length>pre&&m&&m.who==='bot')m.text='AI가 지금 안 돼서 내가 알아들은 대로 했어. 틀리면 아니 눌러줘!\n'+m.text;ui.scrollBottom=true;commit();return;}
     const local=localIntent(text,true);
     if(local&&local.task){openPropFor(local.task,'AI 응답이 안 와서 내가 직접 계산했어.');return;}
     botSay(err&&err.code==='rate_limited'?'잠깐 너무 많이 물어봤나 봐. 조금 있다가 다시 말해줘!':err&&err.code==='billing'?'구글 결제 쪽 문제로 키가 멈췄어. AI Studio에서 결제 설정을 끝까지 마쳤는지(충전까지) 확인해줘. ('+String(err.message||'').slice(0,80)+')':err&&err.code==='bad_key'?'Gemini 키가 안 받아들여졌어. ('+String(err.message||'').slice(0,80)+')':'AI 연결에 문제가 있었어'+(err&&err.message?' ('+err.message+')':'')+'. 한 번 더 말해주거나 직접 입력을 써줘.');
@@ -1596,6 +1600,8 @@ function textDates(text){
 }
 function localEvent(text){
   if(/휴강|취소|까지|시간\s*(짜리|정도|걸)|빈\s*시간|잡아|배치/.test(text))return null;
+  if(/알려|뭐|언제|몇|어때|어떻|남은|\?/.test(text))return null;
+  if(/[.!?]\s*\S|색|다르게|해\s*줘|으로|이라|때문|말고|대신|에서|랑|하고/.test(text))return null;
   const ds=textDates(text);if(ds.length!==1)return null;
   let start=null,end=null;
   const rg=text.match(/(오전|오후|아침|낮|저녁|밤)?\s*(\d{1,2})\s*시\s*(반)?\s*(?:~|-|부터)\s*(오전|오후|아침|낮|저녁|밤)?\s*(\d{1,2})\s*시\s*(반)?/);
@@ -1604,10 +1610,10 @@ function localEvent(text){
     if(one){start=parseHour((one[1]||'')+one[2]+'시'+(one[3]||''));if(!one[1]&&start<420)start+=720;end=start+60;}
     else if(/오전|아침/.test(text)){start=540;end=720;}else if(/오후|낮/.test(text)){start=780;end=1080;}else if(/저녁|밤/.test(text)){start=1080;end=1260;}}
   const title=text.replace(/오늘|내일|모레|(다음\s*주\s*)?[월화수목금토일]요일|\d{1,2}\s*[\/월]\s*\d{1,2}일?|\d{1,2}일/g,' ').replace(/(오전|오후|아침|낮|저녁|밤)?\s*\d{1,2}\s*시\s*(반)?\s*(~|-|부터)?\s*(오전|오후|아침|낮|저녁|밤)?\s*(\d{1,2}\s*시\s*(반)?)?(까지)?/g,' ').replace(/오전|오후|아침|낮|저녁|밤|에|있어|있음|일정|추가|넣어줘|넣어/g,' ').replace(/\s+/g,' ').trim();
-  if(!title||title.length>20)return null;
-  if(start==null)return {title,date:ds[0],start:null,end:null,cat:'etc',allDay:false,tbd:true,place:'other'};
+  if(!title||title.length>14||title.split(' ').length>3)return null;
+  if(start==null)return null;
   if(end>1439)end=1439;
-  return {title,date:ds[0],start:hm(start),end:hm(end),cat:/합주|드럼/.test(title)?'drum':/과외|학원/.test(title)?'work':'etc',allDay:false,tbd:false,place:'other'};
+  return {title,date:ds[0],start:hm(start),end:hm(end),cat:/합주|드럼/.test(title)?'drum':/과외|학원/.test(title)?'work':/약속|친구|모임|생일|만남/.test(title)?'friend':'etc',allDay:false,tbd:false,place:'other'};
 }
 function localCancel(text){
   if(!/(휴강|취소|안\s*함|없어|빠져|쉬어)/.test(text))return null;
@@ -1682,9 +1688,10 @@ function buildPrompt(text){
   (recent?'최근 대화:\n'+recent+'\n':'')+
   '사용자의 새 메시지: "'+text+'"\n\n'+
   '다음 형식의 JSON 객체 하나만 출력해:\n'+
-  '{"action":"add_task"|"add_event"|"block_time"|"change"|"answer","reply":"사용자에게 할 말(반말, 2~4문장)","changes":[{"op":"cancel|restore|delete|edit","id":"#뒤의 id 그대로","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","title":""}],"task":{"title":"","durationMin":0,"deadline":"YYYY-MM-DD","type":"study|practice|workout|etc","allowSplit":true},"event":{"title":"","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","cat":"class|drum|work|etc","allDay":false,"tbd":false}}\n'+
+  '{"action":"add_task"|"add_event"|"block_time"|"change"|"answer","reply":"사용자에게 할 말(반말, 2~4문장)","changes":[{"op":"cancel|restore|delete|edit","id":"#뒤의 id 그대로","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","title":"","cat":"class|drum|work|friend|etc"}],"task":{"title":"","durationMin":0,"deadline":"YYYY-MM-DD","type":"study|practice|workout|etc","allowSplit":true},"event":{"title":"","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","cat":"class|drum|work|friend|etc","allDay":false,"tbd":false}}\n'+
   '- 해야 할 일·과제·연습처럼 시간을 찾아 넣어야 하면 add_task. 걸리는 시간을 말 안 했으면 합리적으로 추정하고 reply에 추정했다고 말해. 마감을 말 안 했으면 7일 뒤.\n'+
   '- 날짜와 시간이 정해진 약속·수업·일정이면 add_event. 시간을 모르면 tbd true, 하루 종일이면 allDay true.\n'+
+  '- title에는 일정 이름만 짧게 넣어(예: "동집 약속"). 색·종류·이유 같은 부탁은 title에 넣지 말고 해당 필드로 반영해. cat: 수업 class, 드럼·합주 drum, 과외·학원 work, 친구 약속·모임·개인 약속 friend, 그 밖은 etc. "색 다르게"처럼 구분해달라고 하면 그 성격에 맞는 cat으로 넣고 reply에 어떤 색으로 넣었는지 말해. 기존 일정 색·종류를 바꾸라면 change op "edit"에 cat.\n'+
   '- 특정 시간을 비워달라고 하면 block_time (event 필드에 그 시간, title은 "비워두기"나 이유).\n'+
   '- 기존 일정을 휴강·취소하면 change에 op "cancel", 되돌리면 "restore", 지우면 "delete", 날짜·시간·이름을 바꾸면 "edit"(바꿀 값만 채우기). id는 위 일정 목록의 # 뒤 값을 정확히 복사. 여러 개면 changes에 여러 개.\n'+
   '- DOVIS 앱은 일정 추가·수정·휴강·삭제를 전부 할 수 있어. "직접 못 바꾼다"고 말하지 마. 바꾸기 전에 앱이 미리보기를 보여주고 사용자 승인해.\n'+
@@ -1727,8 +1734,9 @@ function normChange(c){
   if(c.op==='edit'){
     out.date=okD.test(c.date||'')?c.date:ev.date;out.start=okT.test(c.start||'')?c.start:ev.start;out.end=okT.test(c.end||'')?c.end:ev.end;
     out.title=c.title?String(c.title).slice(0,30):ev.title;
+    out.cat=CATS[c.cat]&&ev.kind!=='task'?c.cat:ev.cat;
     if(out.start&&out.end&&!(out.end>out.start))return null;
-    out.text=(isTimed(ev)?ev.start+'–'+ev.end:'')+' → '+(out.date!==ev.date?dayLabel(out.date)+' ':'')+(out.start?out.start+'–'+out.end:'')+(out.title!==ev.title?' · '+out.title:'');
+    out.text=(isTimed(ev)?ev.start+'–'+ev.end:'')+' → '+(out.date!==ev.date?dayLabel(out.date)+' ':'')+(out.start?out.start+'–'+out.end:'')+(out.title!==ev.title?' · '+out.title:'')+(out.cat!==ev.cat?' · 색: '+CATS[out.cat]:'');
   }else if(c.op==='cancel')out.text=(isTimed(ev)?ev.start+'–'+ev.end+' ':'')+(ev.kind==='task'?'→ 삭제':'→ 휴강·취소');
   else if(c.op==='restore')out.text=(isTimed(ev)?ev.start+'–'+ev.end+' ':'')+'→ 원래대로';
   else if(c.op==='delete')out.text=(isTimed(ev)?ev.start+'–'+ev.end+' ':'')+(ev.recurring?'→ 이날만 휴강':'→ 삭제');
@@ -1742,14 +1750,14 @@ function applyChange(c){
     if(c.op==='restore'){const i=l.indexOf(e.fid);if(i>=0)l.splice(i,1);if(e.mode!=='fixed')S.confirm[key]='on';return;}
     if(!l.includes(e.fid))l.push(e.fid);
     if(e.mode!=='fixed')S.confirm[key]='off';
-    if(c.op==='edit')S.events.push({id:'e'+uid(),kind:'fixed',date:c.date,start:c.start,end:c.end,title:c.title,short:c.title===e.title?e.short:c.title.slice(0,6),cat:e.cat,place:e.place});
+    if(c.op==='edit')S.events.push({id:'e'+uid(),kind:'fixed',date:c.date,start:c.start,end:c.end,title:c.title,short:c.title===e.title?e.short:c.title.slice(0,6),cat:c.cat||e.cat,place:e.place});
     return;
   }
   const x=S.events.find(y=>y.id===e.id);if(!x)return;
   if(c.op==='delete'||(c.op==='cancel'&&x.kind==='task')){S.events=S.events.filter(y=>y.id!==x.id);return;}
   if(c.op==='cancel'){x.cancelled=true;return;}
   if(c.op==='restore'){x.cancelled=false;return;}
-  if(c.op==='edit'){if(c.title!==x.title){x.title=c.title;x.short=c.title.slice(0,8);}x.date=c.date;if(c.start){x.start=c.start;x.end=c.end;x.tbd=false;x.allDay=false;}}
+  if(c.op==='edit'){if(c.title!==x.title){x.title=c.title;x.short=c.title.slice(0,8);}if(c.cat)x.cat=c.cat;x.date=c.date;if(c.start){x.start=c.start;x.end=c.end;x.tbd=false;x.allDay=false;}}
 }
 function reflowSuggestions(dates){
   const n=nowInfo();const out=[];const temp=[];
@@ -1855,7 +1863,7 @@ document.addEventListener('click',ev=>{
     case 'approveEvent':{const e=ui.prop.event;S.events.push(Object.assign({id:'e'+uid(),kind:'fixed',short:e.title.slice(0,8)},e));ui.prop=null;botSay('추가했어! '+dayLabel(e.date)+' '+(e.allDay?'하루 종일':e.tbd?'시간 미정':e.start+'–'+e.end)+' '+e.title);ui.scrollBottom=true;commit();break;}
     case 'placePool':{const p=S.pool.find(x=>x.id===el.dataset.id);if(p){ui.form=false;openPropFor(Object.assign({},p,{poolId:p.id}));}break;}
     case 'delPool':S.pool=S.pool.filter(x=>x.id!==el.dataset.id);commit();break;
-    case 'quick':handleChat(el.dataset.v);break;
+    case 'quick':handleChat(el.dataset.v,true);break;
     case 'accent':S.settings.accent=el.dataset.v;commit();break;
     case 'dark':S.settings.dark=!S.settings.dark;commit();break;
     case 'rule':S.settings.rules[el.dataset.k]=!S.settings.rules[el.dataset.k];commit();break;

@@ -2,7 +2,7 @@
   "name": "DOVIS",
   "short_name": "DOVIS",
   "description": "알아서 일정을 짜주는 AI 캘린더 비서 (베타)",
-  "version": "0.0.7",
+  "version": "0.0.9",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
