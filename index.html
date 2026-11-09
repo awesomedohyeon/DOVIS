@@ -253,7 +253,7 @@ function seed(){
 const LS_KEY='dovis-state-v1';
 let S=null;
 function loadLocal(){try{const raw=localStorage.getItem(LS_KEY);if(raw)return JSON.parse(raw);}catch(e){}return null;}
-const VERSION='0.0.4';
+const VERSION='0.0.5';
 const STANDALONE=!(window.claude&&window.claude.use);
 function emptySeed(){const x=seed();x.fixed=[];x.events=[];x.skips={};x.confirm={};x.feel={};x.feelDow={};x.feelRef={};x.recurring={hyunsaFrom:'2099-01-05'};x.chat=[{id:'m0',who:'bot',text:'안녕! 나 DOVIS야.\n설정 → 데이터 → "백업 붙여넣기"로 기존 일정을 옮기거나, 여기서 할 일과 일정을 말해줘.'}];x.v=5;return x;}
 S=loadLocal()||(STANDALONE&&location.protocol!=='file:'&&!/claude/.test(location.hostname)?emptySeed():seed());
@@ -1492,31 +1492,41 @@ async function pickGeminiModel(key){
   return G_FALLBACK[0];
 }
 function geminiSampler(key){
-  const call=async(prompt,json,tried)=>{
-    tried=tried||[];let model=lsGet(GMODEL);if(!model){model=await pickGeminiModel(key);lsSet(GMODEL,model);}
+  // 여러 모델에 시차를 두고 동시에 물어보고, 제일 먼저 온 답을 씀 (서버가 붐벼도 빨리 받으려고)
+  const one=async(model,body,ac)=>{
+    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ac?ac.signal:undefined});
+    const j=await r.json().catch(()=>({}));
+    if(r.status===400&&body.generationConfig.thinkingConfig&&/think/i.test(JSON.stringify(j))){const b2=JSON.parse(JSON.stringify(body));delete b2.generationConfig.thinkingConfig;return one(model,b2,ac);}
+    if(r.status===404)throw {code:'model',status:404,message:'모델 없음'};
+    if(!r.ok)throw {code:r.status===400||r.status===403?'bad_key':'upstream',status:r.status,message:(j.error&&j.error.message)||('오류 '+r.status)};
+    return ((((j.candidates||[])[0]||{}).content||{}).parts||[]).map(p=>p.text||'').join('');
+  };
+  const call=async(prompt,json)=>{
+    let list=[];try{list=JSON.parse(lsGet('dovis-gemini-models')||'[]');}catch(x){}
+    let model=lsGet(GMODEL);
+    if(!list.length||!model){model=await pickGeminiModel(key);lsSet(GMODEL,model);try{list=JSON.parse(lsGet('dovis-gemini-models')||'[]');}catch(x){}}
+    const models=[model].concat(list.filter(n=>n!==model)).slice(0,3);
     const body={contents:[{role:'user',parts:[{text:typeof prompt==='string'?prompt:prompt.map(m=>m.content).join('\n')}]}],generationConfig:{temperature:0.4}};
     if(json)body.generationConfig.responseMimeType='application/json';
-    if(lsGet('dovis-gemini-think')!=='no')body.generationConfig.thinkingConfig={thinkingBudget:0};
-    const ac=typeof AbortController!=='undefined'?new AbortController():null;const tm=setTimeout(()=>{if(ac)ac.abort();},20000);
-    let r;
-    try{r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ac?ac.signal:undefined});}
-    catch(e){clearTimeout(tm);
-      if(e&&e.name==='AbortError'){let list=[];try{list=JSON.parse(lsGet('dovis-gemini-models')||'[]');}catch(x){}const lite=list.filter(n=>/lite/.test(n)&&n!==model);if(lite.length)lsSet(GMODEL,lite[0]);}
-      throw {code:'timeout',message:e&&e.name==='AbortError'?'AI 응답이 20초 넘게 안 와서 끊었어. 더 빠른 모델로 바꿔뒀어':'AI 서버에 연결을 못 했어 ('+((e&&e.message)||'네트워크 오류')+')'};}
-    clearTimeout(tm);
-    if((r.status===503||r.status===500||r.status===429)&&tried.length<3){
-      let list=[];try{list=JSON.parse(lsGet('dovis-gemini-models')||'[]');}catch(x){}
-      const nx=list.filter(n=>n!==model&&!tried.includes(n));
-      if(nx.length){lsSet(GMODEL,nx[0]);return call(prompt,json,tried.concat(model));}
-    }
-    if(r.status===429)throw {code:'rate_limited',message:'무료 사용량을 잠깐 다 썼어. 1분쯤 뒤에 다시 해줘'};
-    if(r.status===503||r.status===500)throw {code:'upstream',message:'구글 AI 서버가 지금 붐벼. 잠깐 뒤에 다시 해줘'};
-    if(r.status===404){lsSet(GMODEL,'');throw {code:'model',message:'모델을 다시 찾을게. 한 번 더 말해줘'};}
-    const j=await r.json().catch(()=>({}));
-    if(r.status===400&&body.generationConfig.thinkingConfig&&/think/i.test(JSON.stringify(j))){lsSet('dovis-gemini-think','no');return call(prompt,json,tried);}
-    if(!r.ok)throw {code:r.status===400||r.status===403?'bad_key':'upstream',message:(j.error&&j.error.message)||('오류 '+r.status)};
-    const text=((((j.candidates||[])[0]||{}).content||{}).parts||[]).map(p=>p.text||'').join('');
-    return text;
+    body.generationConfig.thinkingConfig={thinkingBudget:0};
+    return await new Promise((resolve,reject)=>{
+      const acs=[];let done=false,started=0,failed=0,lastErr=null;const timers=[];
+      const finish=(ok,v)=>{if(done)return;done=true;timers.forEach(clearTimeout);acs.forEach(a=>{try{a&&a.abort();}catch(e){}});ok?resolve(v):reject(v);};
+      const start=()=>{
+        if(done||started>=models.length)return;const m=models[started++];
+        const ac=typeof AbortController!=='undefined'?new AbortController():null;acs.push(ac);
+        one(m,body,ac).then(t=>{if(m!==lsGet(GMODEL))lsSet(GMODEL,m);finish(true,t);}).catch(e=>{
+          if(done)return;failed++;
+          if(e&&e.name==='AbortError')return;
+          if(e&&e.code==='bad_key'){finish(false,e);return;}
+          lastErr=e;start();
+          if(failed>=models.length)finish(false,lastErr&&lastErr.status===429?{code:'rate_limited',message:'무료 사용량을 잠깐 다 썼어. 1분쯤 뒤에 다시 해줘'}:{code:'upstream',message:'구글 AI 서버가 지금 많이 붐벼 ('+((lastErr&&lastErr.message)||'연결 실패').slice(0,60)+')'});
+        });
+      };
+      start();
+      timers.push(setTimeout(start,4000));timers.push(setTimeout(start,8000));
+      timers.push(setTimeout(()=>finish(false,{code:'timeout',message:'구글 AI가 15초 넘게 답이 없어. 지금 서버가 많이 붐비는 것 같아'}),15000));
+    });
   };
   const f=async(prompt,opts)=>({text:await call(prompt,false)});
   f.json=async(prompt,opts)=>{const t=await call(prompt,true);const c=t.replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();try{return JSON.parse(c);}catch(e){const m=c.match(/\{[\s\S]*\}/);if(m)return JSON.parse(m[0]);throw {code:'parse',message:'AI 답을 못 읽었어'};}};
