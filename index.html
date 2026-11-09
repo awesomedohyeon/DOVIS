@@ -217,7 +217,7 @@ function seed(){
 const LS_KEY='dovis-state-v1';
 let S=null;
 function loadLocal(){try{const raw=localStorage.getItem(LS_KEY);if(raw)return JSON.parse(raw);}catch(e){}return null;}
-const VERSION='0.0.1';
+const VERSION='0.0.2';
 const STANDALONE=!(window.claude&&window.claude.use);
 function emptySeed(){const x=seed();x.fixed=[];x.events=[];x.skips={};x.confirm={};x.feel={};x.feelDow={};x.feelRef={};x.recurring={hyunsaFrom:'2099-01-05'};x.chat=[{id:'m0',who:'bot',text:'안녕! 나 DOVIS야.\n설정 → 데이터 → "백업 붙여넣기"로 기존 일정을 옮기거나, 여기서 할 일과 일정을 말해줘.'}];x.v=5;return x;}
 S=loadLocal()||(STANDALONE&&location.protocol!=='file:'&&!/claude/.test(location.hostname)?emptySeed():seed());
@@ -1431,7 +1431,7 @@ async function handleChat(text){
     ui.busy=false;
     const local=localIntent(text,true);
     if(local&&local.task){openPropFor(local.task,'AI 응답이 안 와서 내가 직접 계산했어.');return;}
-    botSay(err&&err.code==='rate_limited'?'잠깐 너무 많이 물어봤나 봐. 조금 있다가 다시 말해줘!':'AI 연결에 문제가 있었어. 직접 입력으로 넣어주면 바로 배치할게.');
+    botSay(err&&err.code==='rate_limited'?'잠깐 너무 많이 물어봤나 봐. 조금 있다가 다시 말해줘!':err&&err.code==='bad_key'?'Gemini 키가 안 맞아. 설정 → AI 연결에서 키를 다시 넣어줘.':'AI 연결에 문제가 있었어'+(err&&err.message?' ('+err.message+')':'')+'. 한 번 더 말해주거나 직접 입력을 써줘.');
     if(err&&err.code==='not_granted')ui.ai=false;
     ui.scrollBottom=true;commit();
   }
@@ -1459,10 +1459,16 @@ function geminiSampler(key){
     let model=lsGet(GMODEL);if(!model){model=await pickGeminiModel(key);lsSet(GMODEL,model);}
     const body={contents:[{role:'user',parts:[{text:typeof prompt==='string'?prompt:prompt.map(m=>m.content).join('\n')}]}],generationConfig:{temperature:0.4}};
     if(json)body.generationConfig.responseMimeType='application/json';
-    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(lsGet('dovis-gemini-think')!=='no')body.generationConfig.thinkingConfig={thinkingBudget:0};
+    const ac=typeof AbortController!=='undefined'?new AbortController():null;const tm=setTimeout(()=>{if(ac)ac.abort();},20000);
+    let r;
+    try{r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ac?ac.signal:undefined});}
+    catch(e){clearTimeout(tm);throw {code:'timeout',message:e&&e.name==='AbortError'?'AI 응답이 너무 오래 걸려서 끊었어':'인터넷 연결을 확인해줘'};}
+    clearTimeout(tm);
     if(r.status===429)throw {code:'rate_limited',message:'잠깐 쉬어야 해'};
     if(r.status===404){lsSet(GMODEL,'');throw {code:'model',message:'모델을 다시 찾을게. 한 번 더 말해줘'};}
     const j=await r.json().catch(()=>({}));
+    if(r.status===400&&body.generationConfig.thinkingConfig&&/think/i.test(JSON.stringify(j))){lsSet('dovis-gemini-think','no');return call(prompt,json);}
     if(!r.ok)throw {code:r.status===400||r.status===403?'bad_key':'upstream',message:(j.error&&j.error.message)||('오류 '+r.status)};
     const text=((((j.candidates||[])[0]||{}).content||{}).parts||[]).map(p=>p.text||'').join('');
     return text;
@@ -1515,8 +1521,28 @@ function parseDuration(text){
   return null;
 }
 function guessType(text){if(/운동|헬스/.test(text))return 'workout';if(/드럼|연습/.test(text))return 'practice';if(/과제|보고서|정리|공부|시험|발표|ppt|PPT|레포트/.test(text))return 'study';return 'etc';}
+function subjectMatch(e,t){
+  const c=t.replace(/\s/g,'');const names=[e.short,e.title,(e.title||'').replace(/\d+$/,'')].filter(Boolean).map(x=>x.replace(/\s|·/g,''));
+  return names.some(nm=>nm.length>=2&&(c.includes(nm)||c.includes(nm.slice(0,2))));
+}
+function localCancel(text){
+  if(!/(휴강|취소|안\s*함|없어|빠져|쉬어)/.test(text))return null;
+  const n=nowInfo();let dates=[];
+  if(/오늘/.test(text))dates.push(n.date);if(/모레/.test(text))dates.push(addDays(n.date,2));else if(/내일/.test(text))dates.push(addDays(n.date,1));
+  [...text.matchAll(/(\d{1,2})\s*[\/월]\s*(\d{1,2})/g)].forEach(m=>{const y=parseYmd(n.date).getFullYear();dates.push(y+'-'+pad(+m[1])+'-'+pad(+m[2]));});
+  [...text.matchAll(/(\d{1,2})일/g)].forEach(m=>{const dt=parseYmd(n.date);let d=ymd(new Date(dt.getFullYear(),dt.getMonth(),+m[1]));if(d<n.date)d=ymd(new Date(dt.getFullYear(),dt.getMonth()+1,+m[1]));dates.push(d);});
+  const wm=[...text.matchAll(/(다음\s*주\s*)?([월화수목금토일])요일/g)];
+  wm.forEach(m=>{for(let i=0;i<7;i++){const c=addDays(n.date,i+(m[1]?7:0));if(dow(c)===WDAY[m[2]]){dates.push(c);break;}}});
+  if(!dates.length)return null;
+  const ch=[];
+  [...new Set(dates)].forEach(d=>eventsOn(d).forEach(e=>{if(e.state==='off'||!isTimed(e))return;if(subjectMatch(e,text))ch.push({op:'cancel',id:e.uid});}));
+  const list=ch.map(normChange).filter(Boolean);
+  return list.length?list:null;
+}
 function localIntent(text,force){
   const n=nowInfo();
+  const lc=localCancel(text);
+  if(lc){botSay(lc.length+'개 휴강·취소로 바꿀게. 확인해줘!');ui.prop={changes:lc};ui.busy=false;return {handled:true};}
   if(/빈\s*시간|비는|비어|한가/.test(text)){
     const from=/다음\s*주/.test(text)?addDays(weekStart(n.date),7):n.date;
     const days=/다음\s*주/.test(text)?7:Math.max(1,7-dow(n.date));
@@ -1565,7 +1591,7 @@ function buildPrompt(text){
   return '너는 DOVIS, 사용자의 AI 일정 비서야. 반말로 밝고 친한 친구처럼, 짧고 구체적으로 말해.\n'+
   '지금: '+n.date+'('+DAYS[dow(n.date)]+') '+hm(n.min)+'\n'+
   '규칙: 과외·학원 끝난 뒤엔 일정 넣지 않음'+(S.settings.rules.noAfterWork?'(켜짐)':'(꺼짐)')+'. 과제는 되도록 한 번에. 모든 배치는 사용자 승인 후 확정. 기상은 첫 일정 2시간 전, 수면 7시간 반. 평일엔 학교 옆 헬스장에서 운동(집 가기 직전).'+((S.rules||[]).filter(r=>r.on).length?' 사용자가 추가한 규칙: '+(S.rules||[]).filter(r=>r.on).map(r=>'"'+r.text+'"').join(', ')+'.':'')+'\n'+
-  '앞으로 14일 일정과 빈 시간(이동 시간·규칙 반영):\n'+scheduleSummary(14)+'\n'+
+  '앞으로 일정과 빈 시간(이동 시간·규칙 반영):\n'+scheduleSummary(/다음\s*주|다다음|\d+일|\d+\/\d+/.test(text)?14:7)+'\n'+
   '배치 안 된 할 일: '+(S.pool.map(p=>p.title+' '+p.durationMin+'분 마감 '+p.deadline).join('; ')||'없음')+'\n'+
   (recent?'최근 대화:\n'+recent+'\n':'')+
   '사용자의 새 메시지: "'+text+'"\n\n'+
