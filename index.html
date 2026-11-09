@@ -253,7 +253,7 @@ function seed(){
 const LS_KEY='dovis-state-v1';
 let S=null;
 function loadLocal(){try{const raw=localStorage.getItem(LS_KEY);if(raw)return JSON.parse(raw);}catch(e){}return null;}
-const VERSION='0.0.5';
+const VERSION='0.0.7';
 const STANDALONE=!(window.claude&&window.claude.use);
 function emptySeed(){const x=seed();x.fixed=[];x.events=[];x.skips={};x.confirm={};x.feel={};x.feelDow={};x.feelRef={};x.recurring={hyunsaFrom:'2099-01-05'};x.chat=[{id:'m0',who:'bot',text:'안녕! 나 DOVIS야.\n설정 → 데이터 → "백업 붙여넣기"로 기존 일정을 옮기거나, 여기서 할 일과 일정을 말해줘.'}];x.v=5;return x;}
 S=loadLocal()||(STANDALONE&&location.protocol!=='file:'&&!/claude/.test(location.hostname)?emptySeed():seed());
@@ -1466,7 +1466,7 @@ async function handleChat(text){
     ui.busy=false;
     const local=localIntent(text,true);
     if(local&&local.task){openPropFor(local.task,'AI 응답이 안 와서 내가 직접 계산했어.');return;}
-    botSay(err&&err.code==='rate_limited'?'잠깐 너무 많이 물어봤나 봐. 조금 있다가 다시 말해줘!':err&&err.code==='bad_key'?'Gemini 키가 안 맞아. 설정 → AI 연결에서 키를 다시 넣어줘.':'AI 연결에 문제가 있었어'+(err&&err.message?' ('+err.message+')':'')+'. 한 번 더 말해주거나 직접 입력을 써줘.');
+    botSay(err&&err.code==='rate_limited'?'잠깐 너무 많이 물어봤나 봐. 조금 있다가 다시 말해줘!':err&&err.code==='billing'?'구글 결제 쪽 문제로 키가 멈췄어. AI Studio에서 결제 설정을 끝까지 마쳤는지(충전까지) 확인해줘. ('+String(err.message||'').slice(0,80)+')':err&&err.code==='bad_key'?'Gemini 키가 안 받아들여졌어. ('+String(err.message||'').slice(0,80)+')':'AI 연결에 문제가 있었어'+(err&&err.message?' ('+err.message+')':'')+'. 한 번 더 말해주거나 직접 입력을 써줘.');
     if(err&&err.code==='not_granted')ui.ai=false;
     ui.scrollBottom=true;commit();
   }
@@ -1476,10 +1476,16 @@ const GKEY='dovis-gemini-key',GMODEL='dovis-gemini-model';
 function lsGet(k){try{return localStorage.getItem(k)||'';}catch(e){return '';}}
 function lsSet(k,v){try{if(v)localStorage.setItem(k,v);else localStorage.removeItem(k);}catch(e){}}
 const G_FALLBACK=['gemini-3.8-flash','gemini-3.6-flash','gemini-3.5-flash','gemini-2.5-flash'];
+function geminiErrCode(status,msg){
+  if(/billing|prepay|credit|balance|payment|결제/i.test(msg))return 'billing';
+  if(/api[ _]?key|API_KEY/i.test(msg))return 'bad_key';
+  if(status===429)return 'rate_limited';
+  return 'upstream';
+}
 async function pickGeminiModel(key){
   try{
     const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key='+encodeURIComponent(key));
-    if(r.status===400||r.status===403){const j=await r.json().catch(()=>({}));throw {code:'bad_key',message:(j.error&&j.error.message)||'키가 올바르지 않아'};}
+    if(r.status===400||r.status===403){const j=await r.json().catch(()=>({}));const msg=(j.error&&j.error.message)||'키가 올바르지 않아';const c=geminiErrCode(r.status,msg);if(c==='bad_key'||c==='billing')throw {code:c,message:msg};}
     const j=await r.json();
     const all=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>m.name.replace('models/',''))
       .filter(n=>/^gemini-.*flash/.test(n)&&!/(image|tts|audio|live|preview|exp|thinking|8b|native)/.test(n));
@@ -1488,7 +1494,7 @@ async function pickGeminiModel(key){
     lsSet('dovis-gemini-models',JSON.stringify(all));
     const lite=all.filter(n=>/lite/.test(n)),full=all.filter(n=>!/lite/.test(n));
     if(lite.length)return lite[0];if(full.length)return full[0];
-  }catch(e){if(e&&e.code==='bad_key')throw e;}
+  }catch(e){if(e&&(e.code==='bad_key'||e.code==='billing'))throw e;}
   return G_FALLBACK[0];
 }
 function geminiSampler(key){
@@ -1498,7 +1504,7 @@ function geminiSampler(key){
     const j=await r.json().catch(()=>({}));
     if(r.status===400&&body.generationConfig.thinkingConfig&&/think/i.test(JSON.stringify(j))){const b2=JSON.parse(JSON.stringify(body));delete b2.generationConfig.thinkingConfig;return one(model,b2,ac);}
     if(r.status===404)throw {code:'model',status:404,message:'모델 없음'};
-    if(!r.ok)throw {code:r.status===400||r.status===403?'bad_key':'upstream',status:r.status,message:(j.error&&j.error.message)||('오류 '+r.status)};
+    if(!r.ok){const msg=(j.error&&j.error.message)||('오류 '+r.status);throw {code:geminiErrCode(r.status,msg),status:r.status,message:msg};}
     return ((((j.candidates||[])[0]||{}).content||{}).parts||[]).map(p=>p.text||'').join('');
   };
   const call=async(prompt,json)=>{
@@ -1518,7 +1524,7 @@ function geminiSampler(key){
         one(m,body,ac).then(t=>{if(m!==lsGet(GMODEL))lsSet(GMODEL,m);finish(true,t);}).catch(e=>{
           if(done)return;failed++;
           if(e&&e.name==='AbortError')return;
-          if(e&&e.code==='bad_key'){finish(false,e);return;}
+          if(e&&(e.code==='bad_key'||e.code==='billing')){finish(false,e);return;}
           lastErr=e;start();
           if(failed>=models.length)finish(false,lastErr&&lastErr.status===429?{code:'rate_limited',message:'무료 사용량을 잠깐 다 썼어. 1분쯤 뒤에 다시 해줘'}:{code:'upstream',message:'구글 AI 서버가 지금 많이 붐벼 ('+((lastErr&&lastErr.message)||'연결 실패').slice(0,60)+')'});
         });
@@ -1552,7 +1558,7 @@ async function saveGeminiKey(key){
     const t=await geminiSampler(key)('한 단어로만 답해: 안녕',{});
     ui.gstat='연결됐어! ('+model+') · 테스트 답: '+String(t.text||'').slice(0,20);
   }catch(e){
-    ui.gstat=e&&e.code==='bad_key'?'키가 올바르지 않아. 다시 복사해서 넣어줘':e&&e.code==='rate_limited'?'키는 됐는데 지금 사용량이 많아. 조금 뒤에 써줘':'연결 실패: '+((e&&e.message)||'알 수 없는 오류');
+    ui.gstat=e&&e.code==='billing'?'결제 설정 문제: '+e.message:e&&e.code==='bad_key'?'키 문제: '+e.message:e&&e.code==='rate_limited'?'키는 됐는데 지금 사용량이 많아. 조금 뒤에 써줘':'연결 실패: '+((e&&e.message)||'알 수 없는 오류');
     if(!(e&&e.code==='rate_limited'))lsSet(GKEY,lsGet(GKEY));
   }
   render();
