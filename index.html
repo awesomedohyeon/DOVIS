@@ -271,7 +271,7 @@ function seed(){
 const LS_KEY='dovis-state-v1';
 let S=null;
 function loadLocal(){try{const raw=localStorage.getItem(LS_KEY);if(raw)return JSON.parse(raw);}catch(e){}return null;}
-const VERSION='0.2.0';
+const VERSION='0.2.1';
 const STANDALONE=!(window.claude&&window.claude.use);
 function emptySeed(){const x=seed();x.fixed=[];x.events=[];x.skips={};x.confirm={};x.feel={};x.feelDow={};x.feelRef={};x.recurring={hyunsaFrom:'2099-01-05'};x.chat=[{id:'m0',who:'bot',text:'안녕! 나 DOVIS야.\n설정 → 데이터 → "백업 붙여넣기"로 기존 일정을 옮기거나, 여기서 할 일과 일정을 말해줘.'}];x.v=5;return x;}
 S=loadLocal()||(STANDALONE&&location.protocol!=='file:'&&!/claude/.test(location.hostname)?emptySeed():seed());
@@ -1576,8 +1576,25 @@ function renderAccount(){
   if(!fbUser)return '<div class="card"><h2>계정</h2><div class="muted" style="line-height:1.5">구글로 로그인하면 폰·패드에서 같은 일정을 써. 로그인 안 하면 이 기기에만 저장돼.</div>'+(fbStatus?'<div class="muted">'+esc(fbStatus)+'</div>':'')+'<button class="btn" data-a="fbIn">구글로 로그인</button></div>';
   return '<div class="card"><h2>계정</h2><div class="li"><div><div style="font-size:14px;font-weight:600">'+esc(fbUser.email||fbUser.displayName||'로그인됨')+'</div><div class="muted">'+esc(fbStatus||'동기화 켜짐')+'</div></div><button class="btn sm ghost" data-a="fbOut">로그아웃</button></div></div>';
 }
+function parseBackup(raw){
+  // 폰에서 복사할 때 생기는 따옴표 변형·앞뒤 잡글자·잘림을 최대한 견딤
+  let t=String(raw||'').replace(/[\u200B-\u200D\uFEFF]/g,'').replace(/[\u201C\u201D\u201E\u2033]/g,'"').replace(/[\u2018\u2019]/g,"'").trim();
+  if(!t)return {err:'붙여넣은 내용이 비어 있어'};
+  const a=t.indexOf('{'),b=t.lastIndexOf('}');
+  if(a<0)return {err:'백업 글자가 아니야. { 로 시작해야 해'};
+  if(b<a)return {err:'끝부분이 잘렸어. 전체를 복사했는지 확인해줘 (지금 '+t.length+'글자)'};
+  t=t.slice(a,b+1);
+  let x;try{x=JSON.parse(t);}catch(e){
+    try{x=JSON.parse(t.replace(/\r?\n/g,''));}catch(e2){return {err:'중간이 잘렸거나 바뀐 것 같아 (지금 '+t.length+'글자). "백업 파일에서 불러오기"를 써봐'};}
+  }
+  if(typeof x==='string'){try{x=JSON.parse(x);}catch(e){}}
+  if(x&&x.json&&typeof x.json==='string'){try{x=JSON.parse(x.json);}catch(e){}}
+  if(!(x&&Array.isArray(x.fixed)&&Array.isArray(x.events)&&x.settings))return {err:'DOVIS 백업 형식이 아니야'};
+  return {x};
+}
 /* ---------- 업데이트 내역 ---------- */
 const CHANGELOG=[
+ {v:'0.2.1',d:'11/10',t:'백업 가져오기 개선',items:['폰에서 복사하다 바뀐 따옴표·앞뒤 글자·줄바꿈을 알아서 정리','백업 파일(.txt)에서 바로 불러오기','가져오기 실패하면 왜 안 되는지(잘림 등) 알려줌']},
  {v:'0.2.0',d:'11/10',t:'진짜 앱이 되다',items:['안드로이드 앱(APK) 출시: 홈 화면 위젯 2개 (오늘 요약 · 주간 달력)','아침 기상 시간에 맞춰 오늘 요약·할 일 알림','폰 캘린더와 양방향 연동 (DOVIS → 구글은 특별한 일정만)','패드 화면: 왼쪽 메뉴 + 오른쪽 DOVIS 대화, 하루 탭 두 칸','구글 로그인·폰↔패드 동기화 준비 (곧 켜짐)','하루 탭: 오늘 일정을 한 줄로 ("4시까지 수업 → 운동(1.5h) → 저녁 → 과외")','DOVIS 한마디가 친구처럼 하루를 시간 순서대로 설명','할 일 체크 목록: 완료했어 / 내일 할게 / 기타(직접 적기), 일정에 묶어서 알림','주의할 점은 시간이 촉박할 때만 + 옮길 자리 제안, 나머지는 조언으로','대화로 규칙 추가·확인·삭제, "앞 일정 끝나고 30분 여유" 같은 여유 시간 규칙','시작 화면: 파란 배경 + 하얀 로고 + DOVIS','설정 정리 + 업데이트 내역, 체감 버튼 숨김, DOVIS 탭 빨간 숫자 없앰','화면·탭 바 고정, 버튼 글자 줄바꿈 수정']},
  {v:'0.1.11',d:'11/10',t:'AI 사용량 아끼기',items:['한도를 다 쓴 모델은 다시 찰 때까지 건너뜀','기본 모델을 무료 한도가 큰 2.5 Flash-Lite로','질문 하나에 요청 하나 (느릴 때만 한 번 더)']},
  {v:'0.1.10',d:'11/10',t:'사용량 오류 바로잡기',items:['무료 사용량 초과를 결제 문제로 잘못 알려주던 것 수정','다 쓴 모델 대신 다른 모델로 넘어가기']},
@@ -1660,7 +1677,7 @@ function renderEditForm(e){
 }
 function renderDialog(){
   const d=ui.dialog;
-  return '<div class="overlay" style="justify-content:center;padding:24px"><div class="card" role="alertdialog" aria-label="'+esc(d.title)+'"><h2>'+esc(d.title)+'</h2><div style="font-size:14px;line-height:1.5;color:var(--sub2);white-space:pre-wrap">'+esc(d.body)+'</div>'+(d.copy?'<textarea class="inp" rows="6" readonly>'+esc(d.copy)+'</textarea>':'')+(d.input?'<label for="importin" class="sr">백업 내용</label><textarea id="importin" class="inp" rows="6" placeholder="여기에 붙여넣기"></textarea>':'')+'<div class="row" style="justify-content:flex-end">'+(d.okAction?(d.altAction?'<button class="btn ghost sm" data-a="'+d.altAction+'">'+esc(d.alt)+'</button>':'<button class="btn ghost sm" data-a="closeDialog">취소</button>')+'<button class="btn sm" data-a="'+d.okAction+'" style="'+(d.danger?'background:var(--danger)':'')+'">'+esc(d.ok)+'</button>':'<button class="btn sm" data-a="closeDialog">닫기</button>')+'</div></div></div>';
+  return '<div class="overlay" style="justify-content:center;padding:24px"><div class="card" role="alertdialog" aria-label="'+esc(d.title)+'"><h2>'+esc(d.title)+'</h2><div style="font-size:14px;line-height:1.5;color:var(--sub2);white-space:pre-wrap">'+esc(d.body)+'</div>'+(d.copy?'<textarea class="inp" rows="6" readonly>'+esc(d.copy)+'</textarea>':'')+(d.input?'<label for="importin" class="sr">백업 내용</label><textarea id="importin" class="inp" rows="6" placeholder="여기에 붙여넣기"></textarea><label class="btn sm soft" style="align-self:flex-start;cursor:pointer">백업 파일에서 불러오기<input type="file" id="importfile" accept=".txt,.json,text/plain,application/json" style="display:none"></label>':'')+'<div class="row" style="justify-content:flex-end">'+(d.okAction?(d.altAction?'<button class="btn ghost sm" data-a="'+d.altAction+'">'+esc(d.alt)+'</button>':'<button class="btn ghost sm" data-a="closeDialog">취소</button>')+'<button class="btn sm" data-a="'+d.okAction+'" style="'+(d.danger?'background:var(--danger)':'')+'">'+esc(d.ok)+'</button>':'<button class="btn sm" data-a="closeDialog">닫기</button>')+'</div></div></div>';
 }
 
 /* ================= 동작 ================= */
@@ -2294,8 +2311,9 @@ document.addEventListener('click',ev=>{
     case 'dark':S.settings.dark=!S.settings.dark;commit();break;
     case 'rule':S.settings.rules[el.dataset.k]=!S.settings.rules[el.dataset.k];commit();break;
     case 'importAsk':ui.dialog={title:'백업 붙여넣기',body:'다른 기기나 claude.ai 버전에서 "백업 복사"한 내용을 붙여넣어줘. 지금 이 기기의 데이터는 덮어써져.',input:true,ok:'가져오기',okAction:'importDo',danger:true};render();break;
-    case 'importDo':{const ta=document.getElementById('importin');let ok=false;try{const x=JSON.parse(ta.value);if(x&&Array.isArray(x.fixed)&&Array.isArray(x.events)&&x.settings){S=x;migrate();migrate3();ok=true;}}catch(e){}
-      if(!ok){showToast('백업 내용이 올바르지 않아. 전체를 그대로 복사했는지 확인해줘');break;}
+    case 'importDo':{const ta=document.getElementById('importin');const r=parseBackup(ta?ta.value:'');let ok=false;
+      if(r.x){S=r.x;migrate();migrate3();ok=true;}
+      if(!ok){showToast(r.err||'백업 내용이 올바르지 않아');break;}
       ui.dialog=null;commit({silent:true});showToast('가져왔어! 일정 '+S.events.length+'개, 시간표 '+S.fixed.length+'개');break;}
     case 'export':ui.dialog={title:'백업 데이터',body:'아래 내용을 복사해서 보관해둬.',copy:JSON.stringify(S)};render();
       try{navigator.clipboard.writeText(JSON.stringify(S)).then(()=>showToast('복사했어!'),()=>{});}catch(e){}break;
@@ -2374,6 +2392,7 @@ let memoTimer=null;
 document.addEventListener('input',ev=>{
   const t=ev.target;
   if(t.id==='chatin'){ui.draft=t.value;return;}
+  if(t.id==='importfile'&&t.files&&t.files[0]){const fr=new FileReader();fr.onload=()=>{const ta=document.getElementById('importin');if(ta)ta.value=String(fr.result||'');showToast('파일 읽었어! 가져오기를 눌러줘');};fr.readAsText(t.files[0]);return;}
   if(t.dataset&&t.dataset.gmodel){lsSet(GMODEL,t.value);ui.gstat='모델: '+t.value;return;}
   if(t.dataset&&t.dataset.memo){const d=t.dataset.memo;setDaily(d,{memo:t.value});clearTimeout(memoTimer);memoTimer=setTimeout(()=>commit({silent:true}),700);return;}
   if(t.dataset&&t.dataset.num){const v=parseInt(t.value,10);if(isNaN(v))return;const [o,k]=t.dataset.num.split('.');(o==='t'?S.travel:S.settings)[k]=Math.max(0,Math.min(600,v));clearTimeout(memoTimer);memoTimer=setTimeout(()=>commit({silent:true}),500);}
