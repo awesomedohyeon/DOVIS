@@ -271,7 +271,7 @@ function seed(){
 const LS_KEY='dovis-state-v1';
 let S=null;
 function loadLocal(){try{const raw=localStorage.getItem(LS_KEY);if(raw)return JSON.parse(raw);}catch(e){}return null;}
-const VERSION='0.2.1';
+const VERSION='0.2.2';
 const STANDALONE=!(window.claude&&window.claude.use);
 function emptySeed(){const x=seed();x.fixed=[];x.events=[];x.skips={};x.confirm={};x.feel={};x.feelDow={};x.feelRef={};x.recurring={hyunsaFrom:'2099-01-05'};x.chat=[{id:'m0',who:'bot',text:'안녕! 나 DOVIS야.\n설정 → 데이터 → "백업 붙여넣기"로 기존 일정을 옮기거나, 여기서 할 일과 일정을 말해줘.'}];x.v=5;return x;}
 S=loadLocal()||(STANDALONE&&location.protocol!=='file:'&&!/claude/.test(location.hostname)?emptySeed():seed());
@@ -563,7 +563,9 @@ function taskState(e){
 /* ================= 구글 캘린더 동기화 ================= */
 const GCAL='Google Calendar';
 let mcpNs, gsyncBusy=false, gsyncAgain=false, gsyncTimer=null;
-function gState(){if(!S.gsync)S.gsync={on:true,push:true,sleep:false,map:{},status:''};if(!S.gsync.map)S.gsync.map={};S.gsync.on=true;S.gsync.push=true;return S.gsync;}
+function gState(){if(!S.gsync)S.gsync={on:false,push:true,sleep:false,map:{},status:''};const g=S.gsync;if(!g.map)g.map={};if(!g.pending)g.pending=[];g.on=!!g.allowRead;g.push=true;
+  if(S.gimported&&S.gimported.length){const n=nowInfo().date;S.gimported.forEach(x=>{if(x.date>=n&&!g.pending.some(p=>p.id===x.id))g.pending.push({id:x.id,gid:x.gid,title:x.title,date:x.date,start:x.start,end:x.end,allDay:!!x.allDay});});S.gimported=[];}
+  return g;}
 async function getMcp(){
   if(!window.claude||!window.claude.use)return null;
   if(mcpNs===undefined){try{mcpNs=await window.claude.use('mcp');}catch(e){mcpNs=null;}}
@@ -583,7 +585,7 @@ function gcalDesired(){
     const d=addDays(n.date,i);
     eventsOn(d).forEach(e=>{
       if(e.state==='off')return;if(e.kind==='task'&&e.status==='miss')return;
-      if(e.recurring||e.source==='google'||e.kind==='task')return;
+      if(!e.gpush)return;
       const allDay=!isTimed(e);
       const summary=(e.state==='unknown'?'(확인 필요) ':'')+(e.tbd?'(시간 미정) ':'')+e.title+(e.kind==='task'?' · 할 일':'');
       out[e.uid]={date:d,body:{summary,allDay,
@@ -621,7 +623,7 @@ function gErrText(e){
 const G_STOP=['needs_reauth','server_not_connected','selection_required','not_in_manifest','approval_required','consent_required','blocked_by_policy','not_granted','capability_disabled','capability_removed'];
 function saveQuiet(){try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}}
 async function gcalSync(){
-  const g=gState();if(!g.on||!g.push)return;
+  const g=gState();if(!g.push)return;
   if(NATIVE)return nativeCalSync();
   if(gsyncBusy){gsyncAgain=true;return;}
   const mcp=await getMcp();
@@ -682,7 +684,8 @@ function nCall(fn,...a){try{if(NATIVE&&typeof NATIVE[fn]==='function')return NAT
 const nativeWaiters={};
 window.dovisNativeEvent=function(type,data){
   if(type==='resume'){render();nativeImport();nativeSoon();}
-  if(type==='open'&&data){ui.tab=data==='week'?'week':'today';if(ui.tab==='today')ui.date=nowInfo().date;render();}
+  if(type==='open'&&data){ui.tab=data==='week'?'week':data==='dovis'?'dovis':'today';if(ui.tab==='today')ui.date=nowInfo().date;render();}
+  if(type==='say'&&data){if(layoutMode()!=='wide')ui.tab='dovis';ui.scrollBottom=true;render();handleChat(String(data));}
   if(type==='calendarPermission'&&data==='1'){nativeImport();gcalSync();}
   const w=nativeWaiters[type];if(w){delete nativeWaiters[type];w(data);}
 };
@@ -692,7 +695,7 @@ function widgetData(){
   const one=(dd,isT)=>{const A=dayAnalysis(dd);const flow=dayFlow(dd).map(x=>x.label).join(' → ');
     const nextEv=eventsOn(dd).filter(e=>isTimed(e)&&e.state!=='off'&&(!isT||toMin(e.start)>n.min)).sort((a,b)=>toMin(a.start)-toMin(b.start))[0];
     const td=(isT?todosFor(dd):todos().filter(t=>!t.done)).filter(t=>!t.done);
-    return {date:dd,label:dayLabel(dd).replace('내일','').trim()||md(dd),headline:isT?A.headline:A.headline.replace(/^내일은/,'오늘은'),flow:flow||'정해진 일정 없음',
+    return {date:dd,label:dayLabel(dd).replace('내일','').trim()||md(dd),headline:friendlyHeadline(dd).replace(/^내일은/,'오늘은').replace(/^[월화수목금토일]요일은/,'오늘은'),flow:flow||'정해진 일정 없음',
       warn:(A.tight[0]&&A.tight[0].t.replace(/^내일/,'오늘'))||'',next:nextEv?nextEv.start+' '+(nextEv.short||nextEv.title):'',todos:td.slice(0,3).map(t=>t.title),todoCount:td.length};};
   const todays=[one(d,true),one(addDays(d,1),false)];
   const ws=weekStart(d);const days=[];
@@ -721,14 +724,14 @@ function morningAlarms(){
 let nativeT=null;
 function nativeSoon(){if(!NATIVE)return;clearTimeout(nativeT);nativeT=setTimeout(()=>{nCall('setWidgets',widgetData());nCall('setAlarms',morningAlarms());},600);}
 function nativeImport(){
-  if(!NATIVE||nCall('hasCalendarPermission')!=='1')return;
+  if(!NATIVE||!gState().allowRead||nCall('hasCalendarPermission')!=='1')return;
   const n=nowInfo();const from=parseYmd(addDays(n.date,-1)).getTime(),to=parseYmd(addDays(n.date,28)).getTime();
   let raw=nCall('readCalendar',String(from),String(to));let list=[];try{list=JSON.parse(raw||'[]');}catch(e){}
-  importGoogle(list.map(x=>({id:'n'+x.id,summary:x.title,description:x.desc||'',start:x.allDay?{date:x.startDate}:{dateTime:x.start},end:x.allDay?{date:x.endDate}:{dateTime:x.end}})));
+  importGoogle(list.map(x=>({id:'n'+x.id,recurringEventId:x.recurring?'r':undefined,summary:x.title,description:x.desc||'',start:x.allDay?{date:x.startDate}:{dateTime:x.start},end:x.allDay?{date:x.endDate}:{dateTime:x.end}})));
 }
 async function nativeCalSync(){
   const g=gState();
-  if(nCall('hasCalendarPermission')!=='1'){g.status='캘린더 접근 허용이 필요해';return;}
+  if(nCall('hasCalendarPermission')!=='1'){if(Object.keys(gcalDesired()).length)nCall('requestCalendar');g.status='캘린더 접근 허용이 필요해';return;}
   const want=gcalDesired();const n=nowInfo();let made=0,upd=0,del=0;
   for(const k of Object.keys(want)){
     const v=want[k];const h=JSON.stringify(v.body);const cur=g.map[k];
@@ -756,7 +759,7 @@ function importGoogle(p){
   items.forEach(it=>{
     if(!it||it.status==='cancelled'||mine.has(it.id)||/^(DOVIS|\[DOVIS\])/.test(it.description||''))return;
     const st=parseGTime(it.start),en=parseGTime(it.end);if(!st)return;
-    const title=String(it.summary||'(제목 없음)').slice(0,40);const base={gid:it.id,title,short:title.slice(0,6),cat:'etc',place:'other',kind:'fixed',source:'google'};
+    const title=String(it.summary||'(제목 없음)').slice(0,40);const base={gid:it.id,grecur:!!it.recurringEventId,title,short:title.slice(0,6),cat:'etc',place:'other',kind:'fixed',source:'google'};
     if(st.allDay){
       let d=st.date;const last=en&&en.date?addDays(en.date,-1):st.date;let k=0;
       while(d<=last&&k<14){list.push(Object.assign({id:'g:'+it.id+':'+d,date:d,allDay:true,start:null,end:null},base));d=addDays(d,1);k++;}
@@ -766,15 +769,45 @@ function importGoogle(p){
       list.push(Object.assign({id:'g:'+it.id,date:st.date,start:st.time,end:endT},base));
     }
   });
-  const prev=S.gimported||[];const sig=a=>JSON.stringify(a.map(x=>[x.id,x.date,x.start,x.end,x.title]));
-  g.istatus='구글 → DOVIS 반영 · '+hm(nowInfo().min);
-  if(sig(prev)===sig(list)){render();return;}
-  const prevIds=new Set(prev.map(x=>x.id));const added=list.filter(x=>!prevIds.has(x.id));
-  const dates=[...new Set(prev.concat(list).filter(x=>{const o=prev.find(y=>y.id===x.id),nw=list.find(y=>y.id===x.id);return JSON.stringify(o)!==JSON.stringify(nw);}).map(x=>x.date))];
-  S.gimported=list;
-  afterChange(dates);
+  // 바로 넣지 않고 "불러올까? 몇 시부터 몇 시까지?" 물어볼 목록으로
+  const today=nowInfo().date;const seen=S.gseen||(S.gseen={});
+  const keyOf=x=>x.id+'|'+x.date+'|'+(x.start||'')+'|'+(x.end||'');
+  const fresh=list.filter(x=>x.date>=today&&!seen[keyOf(x)]&&!g.pending.some(p=>keyOf(p)===keyOf(x)));
+  g.istatus='구글 캘린더 확인 · '+hm(nowInfo().min);
+  g.pending=g.pending.filter(p=>p.date>=today);
+  if(!fresh.length){saveQuiet();return;}
+  fresh.forEach(x=>g.pending.push({id:x.id,gid:x.gid,grecur:!!x.grecur,title:x.title,date:x.date,start:x.start,end:x.end,allDay:!!x.allDay}));
+  // DOVIS 대화에서도 물어보기
+  botSay('구글 캘린더에 새 일정이 '+fresh.length+'개 있어.\n'+fresh.slice(0,4).map(x=>'· '+x.title+' '+dayLabel(x.date)+' '+(x.allDay?'종일':x.start+'–'+x.end)).join('\n')+(fresh.length>4?'\n· 외 '+(fresh.length-4)+'개':'')+'\n불러올까? 몇 시부터 몇 시까지로 할지 아래에서 정해줘.');
+  ui.prop={gpend:true};
   commit({silent:true,noSync:true});
-  if(added.length&&prev.length+added.length>0)showToast('구글 캘린더에서 일정 '+added.length+'개 가져왔어');else render();
+  showToast('구글 캘린더에 새 일정 '+fresh.length+'개가 있어. 하루 탭에서 불러올지 골라줘');
+}
+async function deleteFromGoogle(e){
+  try{
+    if(NATIVE){
+      if(nCall('hasCalendarPermission')!=='1'){nCall('requestCalendar');return false;}
+      const m=String(e.gid||'').match(/^n(\d+)_/);if(!m)return false;
+      return nCall('deleteEvent',m[1])!=='0';
+    }
+    const mcp=await getMcp();if(!mcp)return false;
+    await mcp.callTool(GCAL,'delete_event',{eventId:e.gid,notificationLevel:'NONE'},{cache:false});return true;
+  }catch(err){return false;}
+}
+function gpKey(p){return p.id+'|'+p.date+'|'+(p.start||'')+'|'+(p.end||'');}
+function renderGPending(){
+  const g=gState();const n=nowInfo();const list=g.pending.filter(p=>p.date>=n.date).sort((a,b)=>(a.date+(a.start||'')).localeCompare(b.date+(b.start||'')));
+  if(!list.length)return '';
+  return '<div class="card" style="gap:10px;border:1.5px solid var(--accent)"><div class="between"><h2>구글 캘린더에 새 일정이 있어</h2><span class="muted">'+list.length+'개</span></div><div class="muted">불러올까? 몇 시부터 몇 시까지로 할지 정해줘.</div>'+
+    list.slice(0,5).map((p,i)=>'<div style="display:flex;flex-direction:column;gap:8px;padding:8px 0;border-top:1px solid var(--line2)"><div><b style="font-size:14.5px">'+esc(p.title)+'</b> <span class="muted">'+dayLabel(p.date)+(p.allDay?' · 구글엔 종일':'')+'</span></div>'+
+      '<div class="row" style="gap:6px;flex-wrap:nowrap"><label class="sr" for="gps'+i+'">시작</label><input id="gps'+i+'" type="time" class="inp" style="height:38px;flex:1;min-width:0" value="'+(p.start||'')+'"><span class="muted">–</span><label class="sr" for="gpe'+i+'">끝</label><input id="gpe'+i+'" type="time" class="inp" style="height:38px;flex:1;min-width:0" value="'+(p.end||'')+'"></div>'+
+      '<div class="muted" style="font-size:12px">시간을 둘 다 비우면 종일 일정으로 넣어.</div>'+
+      '<div class="row" style="gap:6px"><button class="btn sm" style="flex:1" data-a="gpAdd" data-k="'+esc(gpKey(p))+'" data-i="'+i+'">불러오기</button><button class="btn sm ghost" style="flex:1" data-a="gpNo" data-k="'+esc(gpKey(p))+'">안 불러오기</button></div></div>').join('')+
+    (list.length>5?'<div class="muted">나머지 '+(list.length-5)+'개는 위에 거 정하면 보여줄게</div>':'')+'</div>';
+}
+function renderGConsent(){
+  const g=gState();if(g.allowRead||g.askedRead)return '';
+  return '<div class="card" style="gap:10px"><h2>구글 캘린더 확인해도 될까?</h2><div class="muted" style="line-height:1.5">허락하면 구글 캘린더에 새 일정이 생길 때마다 "불러올까?" 하고 물어볼게. 묻지 않고 넣거나 보내는 일은 없어.</div><div class="row"><button class="btn" style="flex:1" data-a="gAllow">허락할게</button><button class="btn ghost" style="flex:1" data-a="gDeny">안 할래</button></div></div>';
 }
 async function gcalClear(){
   const g=gState();g.on=false;const mcp=await getMcp();
@@ -911,44 +944,57 @@ function renderFlow(date){
     '<div style="font-size:15.5px;font-weight:600;line-height:1.9">'+it.map(x=>'<span style="white-space:nowrap;'+(x.past?'color:var(--sub);text-decoration:line-through;font-weight:500;':x.now?'color:var(--accent);font-weight:800;':x.meal?'color:var(--sub2);font-weight:500;':'')+'">'+esc(x.label)+'</span>').join('<span style="color:var(--sub);margin:0 6px">→</span>')+'</div>'+(tbd.length?'<div class="muted">시간 미정: '+tbd.map(e=>esc(e.short||e.title)).join(', ')+'</div>':'')+'</div>';
 }
 function timeWord(m){const h=Math.floor(m/60),mi=m%60;const ap=h<12?'오전 ':h<18?'오후 ':'저녁 ';const hh=h>12?h-12:h;return ap+hh+'시'+(mi?(mi===30?' 반':' '+mi+'분'):'');}
-function dayStory(date){
-  // 친구가 하루를 설명하듯 시간 순서대로 풀어서 말해줌 (AI 없이 계산)
-  const n=nowInfo();const isToday=date===n.date;const dn=dayName(date);
-  const evs=eventsOn(date).filter(e=>isTimed(e)&&e.state!=='off'&&!(e.kind==='task'&&e.status==='miss'));
-  const allDay=eventsOn(date).find(e=>e.allDay&&e.state!=='off');
-  if(allDay&&!evs.length)return josa(dn,'은','는')+' '+josa(allDay.title,'이','')+'라 하루 통째로 그쪽에 쓰는 날이야. 다른 건 신경 쓰지 말고 거기 집중해!';
-  let list=evs.sort((a,b)=>toMin(a.start)-toMin(b.start));
-  const out=[];let mentioned=null;
-  const passed=isToday?list.filter(e=>toMin(e.end)<=n.min):[];
-  if(isToday)list=list.filter(e=>toMin(e.end)>n.min);
-  const name=e=>{const t=e.short||e.title;if(e.kind==='task'){if(e.type==='workout')return '운동';return t;}return t;};
-  const wk=wakeMin(date);
-  if(!isToday||n.min<wk+60){
-    const first=list[0];
-    if(first){out.push(timeWord(wk)+'에 일어나서 아침 꼭 챙겨 먹고, '+timeWord(toMin(first.start))+' '+name(first)+'부터 시작해.');mentioned=first;}
-    else out.push(josa(dn,'은','는')+' 정해진 일정이 하나도 없어. 푹 쉬어도 되는 날이야.');
-  }else if(passed.length&&list.length){
-    out.push('지금까지 '+passed.map(name).filter((v,i,a)=>a.indexOf(v)===i).slice(-3).join(', ')+' 지나갔고, 다음은 '+timeWord(toMin(list[0].start))+' '+name(list[0])+'부터야.');mentioned=list[0];
-  }else if(!list.length){
-    out.push(passed.length?'오늘 일정은 다 끝났어! 이제 쉬면서 하루 정리하면 돼.':'오늘은 정해진 일정이 하나도 없어. 푹 쉬어도 되는 날이야.');
-  }
-  const periods=[['오전',0,720],['오후',720,1080],['저녁',1080,1440]];
-  periods.forEach(([pn,a,b])=>{
-    const its=list.filter(e=>toMin(e.start)>=a&&toMin(e.start)<b&&e!==mentioned);if(!its.length)return;
-    const parts=its.map(e=>{const d=toMin(e.end)-toMin(e.start);return hm(toMin(e.start))+' '+name(e)+(e.kind==='task'&&e.type!=='workout'?'('+durText(d)+')':'');});
-    const hasTask=its.some(e=>e.kind==='task');
-    out.push((mentioned&&toMin(mentioned.start)>=a&&toMin(mentioned.start)<b?'그다음 ':pn+'엔 ')+parts.join(', ')+(its.length>1?(hasTask?' 순서로 가.':' 이렇게 있어.'):' 있어.'));
-  });
-  const workT=list.find(e=>e.cat==='work');
-  const gs=gaps(date,'school').sort((x,y)=>(y.e-y.s)-(x.e-x.s));
-  if(gs.length&&gs[0].e-gs[0].s>=60)out.push('제일 숨 돌릴 틈은 '+hm(gs[0].s)+'–'+hm(gs[0].e)+'('+durText(gs[0].e-gs[0].s)+')이라, 밀린 거 있으면 여기 넣으면 딱이야.');
-  else if(list.length>=4)out.push('중간에 길게 비는 시간이 거의 없으니까 이동하면서 틈틈이 쉬어줘.');
-  if(workT)out.push((workT.short||workT.title)+' 끝나면 '+(S.settings.rules.noAfterWork?'더는 일정 안 넣었으니까 바로 쉬어.':'무리하지 말고 쉬어.'));
+function dayStory(date){return dayStoryItems(date).join(' ');}
+function storyParts(date){
+  const n=nowInfo();const isToday=date===n.date;const dn=isToday?'오늘':dayName(date);
+  const all=eventsOn(date).filter(e=>e.state!=='off'&&!(e.kind==='task'&&e.status==='miss'));
+  const allDay=all.filter(e=>e.allDay);const timed=all.filter(isTimed).sort((a,b)=>toMin(a.start)-toMin(b.start));
+  const nm=e=>{if(e.cat==='class'&&e.short)return e.short;const t=String(e.title||'').replace(/\s*\(.*\)\s*$/,'').trim();return t.length<=10?t:(e.short||t);};
+  const per=m=>m<720?'오전':m<1080?'오후':'저녁';
+  return {n,isToday,dn,all,allDay,timed,nm,per};
+}
+function friendlyHeadline(date){
+  // "오늘은 아빠 생신이고, 저녁엔 초등학교 모임이 있어!"
+  const {dn,allDay,timed,nm,per}=storyParts(date);
+  const segs=[];
+  allDay.slice(0,2).forEach(e=>segs.push({cop:true,t:e.title.replace(/\s*\(.*\)$/,'')}));
+  const cls=timed.filter(e=>e.kind==='fixed'&&e.cat==='class');
+  if(cls.length)segs.push({cop:true,t:clockTo(Math.max(...cls.map(e=>toMin(e.end))))+'까지 수업'});
+  const other=timed.filter(e=>e.kind==='fixed'&&e.cat!=='class');
+  const seenP={};other.forEach(e=>{const p=per(toMin(e.start));if(seenP[p]){seenP[p].t+=', '+nm(e);return;}seenP[p]={cop:false,p,t:nm(e)};segs.push(seenP[p]);});
+  if(!segs.length){const tasks=timed.filter(e=>e.kind==='task');return tasks.length?josa(dn,'은','는')+' 정해진 일정 없이 '+tasks.map(e=>e.type==='workout'?'운동':nm(e)).slice(0,2).join(', ')+'만 하면 돼!':josa(dn,'은','는')+' 정해진 일정이 없어. 푹 쉬어도 돼!';}
+  const use=segs.slice(0,3);let out='';
+  use.forEach((g,i)=>{const last=i===use.length-1;
+    if(g.cop)out+=(i===0?josa(dn,'은','는')+' ':'')+josa(g.t,last?'이야':'이고',last?'야':'고');
+    else out+=(i===0?josa(dn,'은','는')+' '+g.p+'에 ':g.p+'엔 ')+josa(g.t,'이','가')+(last?' 있어':' 있고');
+    out+=last?'!':', ';});
+  return out;
+}
+function dayStoryItems(date){
+  // 짧게 항목으로: 빈 시간 추천, 다음 일정, 할 일
+  const {n,isToday,timed,nm}=storyParts(date);
+  const out=[];
+  const left=isToday?timed.filter(e=>toMin(e.end)>n.min):timed;
+  if(isToday&&left.length&&left.length<timed.length)out.push('다음은 '+left[0].start+' '+(left[0].type==='workout'?'운동':nm(left[0]))+'부터야.');
+  // 가장 긴 빈 시간 + 뭘 하면 좋을지
+  const from=isToday?Math.max(n.min,wakeMin(date)+60):wakeMin(date)+60;
+  const busy=timed.filter(e=>e.state!=='off').map(e=>[toMin(e.start)-20,toMin(e.end)+20]).sort((a,b)=>a[0]-b[0]);
+  const gs=[];let cur=from;const endDay=Math.min(1320,lightsOff(date)-60);
+  busy.forEach(([a,b])=>{if(a-cur>=90&&a>cur)gs.push({s:cur,e:Math.min(a,endDay)});cur=Math.max(cur,b);});
+  if(endDay-cur>=90)gs.push({s:cur,e:endDay});
+  gs.forEach(g=>{g.s=roundUp5(g.s);});gs.sort((a,b)=>(b.e-b.s)-(a.e-a.s));
+  const pend=(S.pool||[]).map(t=>t.title);
+  const due=S.events.filter(e=>e.kind==='task'&&e.status==='scheduled'&&e.date>date&&e.type!=='workout').map(e=>e.short||e.title);
+  const what=(pend[0]||due[0]||'').replace(/\s*\(.*\)\s*/g,' ').replace(/\s*[①②③]\s*$/,'').trim();
+  if(gs.length){
+    const g=gs[0];const big=g.e-g.s>=300;
+    out.push((big?'중간 시간은 쭉 비어.':hm(g.s)+'–'+hm(g.e)+'('+durText(g.e-g.s)+')이 비어.')+' 이때 '+(what?josa(what,'을','를')+' 하는 걸 추천해':'과제를 하는 걸 추천해'));
+  }else if(left.length>=4)out.push('중간에 쉴 틈이 거의 없어. 이동하면서 틈틈이 숨 돌려.');
+  const tasks=left.filter(e=>e.kind==='task');
+  if(tasks.length)out.push(tasks.map(e=>(e.type==='workout'?'운동':nm(e))+' '+e.start).join(', ')+' 잡혀 있어.');
   const td=todosFor(date).filter(t=>!t.done);
-  if(td.length)out.push('그리고 '+(td.some(t=>t.due<=date)?(isToday?'오늘':dn)+'까지 끝낼 ':'체크할 ')+'할 일 '+td.length+'개('+td.slice(0,3).map(t=>t.title).join(', ')+(td.length>3?' 등':'')+') 잊지 마!');
-  const lo=lightsOff(date),tw=wakeMin(addDays(date,1));
-  out.push('밤엔 '+hm(lo>=1440?lo-1440:lo)+'쯤 눈 감아야 '+dayName(addDays(date,1))+' '+hm(tw)+' 기상이 편해.');
-  return out.join(' ');
+  if(td.length)out.push(td.slice(0,3).map(t=>t.title).join(', ')+(td.length>3?' 외 '+(td.length-3)+'개':'')+'도 잊지 마!');
+  return out;
 }
 function dayAnalysis(date){
   const n=nowInfo();const isToday=date===n.date,past=date<n.date;const dn=dayName(date);
@@ -1031,7 +1077,7 @@ function dayAnalysis(date){
     }
   }
   const tightSrc=warn.filter(w=>/시간이 겹쳐!|이동이 빠듯해/.test(w));
-  return {dn,headline,sub,warn:warn.filter((v,i)=>warn.indexOf(v)===i),tips,tight,advWarn:warn.filter((v,i)=>warn.indexOf(v)===i&&!tightSrc.includes(v))};
+  return {dn,headline,sub,warn:warn.filter((v,i)=>warn.indexOf(v)===i),tips,tight,advWarn:warn.filter((v,i)=>warn.indexOf(v)===i&&!tightSrc.includes(v)&&!/눈 감아야/.test(v))};
 }
 async function aiDayAdvice(date){
   const sample=await getSample();if(!sample){ui.ai=false;render();return;}
@@ -1097,16 +1143,17 @@ function renderToday(){
   const memo=(S.daily[date]||{}).memo||'';
   const lastEnd=Math.max(0,...evs.filter(isBusy).map(e=>toMin(e.end)));
   const memoTop=isToday&&(n.min>=Math.min(lastEnd,21*60)||n.min>=21*60)&&n.min>=17*60||(date<n.date&&!memo);
-  const memoCard='<div class="card" style="gap:8px'+(memoTop?';border:1.5px solid var(--accent)':'')+'"><label for="memo-'+date+'" style="font-size:15px;font-weight:700">'+(isToday?'오늘':A.dn)+' 하루 어땠어?</label>'+
+  const memoCard='<div class="card" style="gap:8px'+(memoTop?';border:1.5px solid var(--accent)':'')+'"><div class="between"><label for="memo-'+date+'" style="font-size:15px;font-weight:700">'+(isToday?'오늘':A.dn)+' 하루 어땠어?</label>'+(date<=n.date?'<button class="btn sm soft" data-a="tab" data-t="wrap" data-d="'+date+'">하루 마무리</button>':'')+'</div>'+
     '<textarea id="memo-'+date+'" class="inp" rows="4" placeholder="있었던 일, 기분, 잘한 거, 아쉬운 거… 한두 줄이면 충분해" data-memo="'+date+'">'+esc(memo)+'</textarea>'+
     '<div class="muted">쓰는 대로 자동 저장돼. 나중에 계획 짜고 조언할 때 참고할게.</div></div>';
   return '<div class="top"><div><div class="k">'+dayLabel(date)+'</div><h1>'+A.dn+'</h1></div>'+BRAND+'</div>'+renderDayPicker()+
   '<div class="scroll">'+
+  (date===n.date?renderGConsent()+renderGPending():'')+
   (date>=n.date?renderFlow(date):'')+
   '<div class="card" style="gap:12px;border:1.5px solid var(--tint2)">'+
     '<div class="row" style="color:var(--accent)">'+I.spark+'<b style="font-size:13px">DOVIS 한마디</b></div>'+
-    '<div style="font-size:16px;font-weight:700;line-height:1.5">'+esc(A.headline)+'</div>'+
-    (date>=n.date?'<div style="font-size:14.5px;line-height:1.75;color:var(--sub2)">'+esc(dayStory(date))+'</div>':(A.sub.length?'<div style="font-size:14px;line-height:1.6;color:var(--sub2)">'+esc(A.sub.join(' '))+'</div>':''))+
+    '<div style="font-size:16px;font-weight:700;line-height:1.5">'+esc(date>=n.date?friendlyHeadline(date):A.headline)+'</div>'+
+    (date>=n.date?'<div style="display:flex;flex-direction:column;gap:7px">'+dayStoryItems(date).map(t=>'<div class="row" style="align-items:flex-start;gap:8px;font-size:14.5px;line-height:1.6;color:var(--sub2)"><span style="flex:none;width:5px;height:5px;border-radius:3px;background:var(--accent);margin-top:10px"></span><span>'+esc(t)+'</span></div>').join('')+'</div>':(A.sub.length?'<div style="font-size:14px;line-height:1.6;color:var(--sub2)">'+esc(A.sub.join(' '))+'</div>':''))+
     ((S.feel||{})[date]&&ui.feelOpen!==date?'<button class="muted" style="border:none;background:none;padding:0;text-align:left;font-size:12px" data-a="feelOpen" data-d="'+date+'">체감: '+({free:'여유',ok:'괜찮음',some:'조금 바쁨',busy:'바쁨'}[S.feel[date]]||'')+' · 바꾸기</button>':'<div class="row" style="flex-wrap:wrap;gap:6px"><span class="muted">체감은 어때?</span>'+[['free','여유'],['ok','괜찮음'],['some','조금 바쁨'],['busy','바쁨']].map(f=>{const on=dayLevel(date)===f[0];return '<button class="chip'+(on?' on':'')+'" style="height:30px;padding:0 10px;font-size:12px" data-a="feel" data-d="'+date+'" data-v="'+f[0]+'" aria-pressed="'+on+'">'+f[1]+'</button>';}).join('')+'</div>')+
     (A.tight.length?'<div style="height:1px;background:var(--line2)"></div><b style="font-size:13px;color:var(--danger)">주의할 점</b>'+A.tight.map(w=>'<div style="display:flex;flex-direction:column;gap:6px"><div class="row" style="align-items:flex-start;font-size:14px;line-height:1.5"><span class="dot" style="background:var(--danger);margin-top:7px"></span><span>'+esc(w.t)+'</span></div>'+(w.id?'<button class="btn sm soft" style="align-self:flex-start" data-a="openPost" data-id="'+w.id+'" data-date="'+date+'">옮길 자리 보기</button>':'')+'</div>').join(''):'')+
     (date>=n.date&&(A.tips.length||A.advWarn.length||adv)?'<div style="height:1px;background:var(--line2)"></div><b style="font-size:13px;color:var(--accent)">조언</b>'+A.advWarn.map(w=>'<div class="row" style="align-items:flex-start;font-size:14px;line-height:1.5"><span class="dot" style="background:var(--accent);margin-top:7px"></span><span>'+esc(w)+'</span></div>').join('')+A.tips.map(x=>'<div style="display:flex;flex-direction:column;gap:2px"><b style="font-size:14px">'+esc(x.t)+'</b><div style="font-size:13px;line-height:1.55;color:var(--sub2)">'+esc(x.b)+'</div></div>').join('')+(adv?'<div style="font-size:13px;line-height:1.6;white-space:pre-wrap;background:var(--tint);border-radius:12px;padding:10px 12px">'+esc(adv)+'</div>':''):'')+
@@ -1114,12 +1161,10 @@ function renderToday(){
   '</div>'+
   renderTodos(date)+
   (memoTop?memoCard:'')+
-  (date<=n.date?'<div class="card" style="gap:8px"><div class="between"><h2>체크리스트</h2><button class="btn sm soft" data-a="tab" data-t="wrap" data-d="'+date+'">하루 마무리</button></div><div class="row" style="gap:8px">'+
-  '<button class="chk '+(bf?'on':'')+'" style="min-height:44px" data-a="daily" data-k="breakfast" data-d="'+date+'" aria-pressed="'+bf+'"><span class="bx">'+(bf?I.check:'')+'</span><b style="font-size:14px">아침</b></button>'+
-  '<button class="chk '+(wo?'on':'')+'" style="min-height:44px" data-a="daily" data-k="workout" data-d="'+date+'" aria-pressed="'+wo+'"><span class="bx">'+(wo?I.check:'')+'</span><b style="font-size:14px">운동</b></button></div></div>':'')+
   '<!--COLSPLIT-->'+(unt?'<div class="tl">'+unt+'</div>':'')+
   '<div class="tl">'+(timeline.length?timeline.join(''):'<div class="empty">시간이 정해진 일정이 없어.</div>')+'</div>'+
-  (fixRows.length?'<div class="card" style="gap:0"><h2 style="margin-bottom:4px">확인 · 수정 필요</h2>'+fixRows.join('')+'</div>':'')+
+  (fixRows.length?'<div class="card" style="gap:0"><h2 style="margin-bottom:4px">확인 · 수정 필요</h2>'+fixRows.join('')+
+    (isToday?'<form id="fixchat" class="row" style="padding-top:12px;flex-wrap:nowrap"><label class="sr" for="fixin">한 번에 처리하기</label><input id="fixin" class="inp" name="t" style="height:42px;flex:1;min-width:0" placeholder="예) 정리본 둘 다 일요일 저녁에 넣어줘" autocomplete="off"><button class="btn sm" aria-label="보내기">보내기</button></form><div class="muted" style="padding-top:6px;font-size:12px">하나씩은 [배치], 한꺼번에는 여기에 말로 해줘</div>':'')+'</div>':'')+
   (!memoTop&&date<=n.date?memoCard:'')+
   '<div class="night"><div class="row">'+I.moon+'<b style="font-size:15px">'+A.dn+' 밤</b></div><div class="g"><div><small>눈 감기</small><b>'+hm(lo)+'</b></div><div><small>'+dayName(tmr)+' 기상</small><b>'+hm(wakeMin(tmr))+'</b></div><div><small>'+dayName(tmr)+' 첫 일정</small><b>'+(fa?fa.start:'없음')+'</b></div></div><div style="font-size:12px;color:#C4C9D4">수면 '+durText(S.settings.sleepMin)+' + 잠드는 시간 '+S.settings.fallAsleepMin+'분 기준</div></div>'+
   '</div>';
@@ -1230,6 +1275,11 @@ function renderProp(){
     return '<div class="prop"><b style="font-size:15px">이렇게 바꿀까?</b>'+renderChangeWeek(ci.items,ci.hide)+p.changes.map(c=>'<div class="slot"><div class="d"><span class="muted">'+DAYS[dow(c.ev.date)]+'</span><b>'+parseYmd(c.ev.date).getDate()+'</b></div><div><div style="font-weight:700">'+esc(c.ev.title)+'</div><div class="muted">'+esc(c.text)+'</div></div></div>').join('')+
       '<div class="row"><button class="btn" style="flex:1" data-a="applyChanges">응, 바꿔줘</button><button class="btn ghost" style="flex:1" data-a="cancelProp">아니</button></div></div>';
   }
+  if(p.gpend){const h=renderGPending();if(!h){return '';}return h.replace('class="card"','class="prop"');}
+  if(p.late){
+    const L=p.late;
+    return '<div class="prop"><b style="font-size:15px">마감을 어떻게 할까?</b><div class="row wrap">'+(L.nd?'<button class="btn" style="flex:1" data-a="lateOk">'+(L.nd===nowInfo().date?'오늘':dayLabel(L.nd))+'까지로 바꾸기</button>':'')+'<button class="btn ghost" style="flex:1;color:var(--danger)" data-a="lateCancel">일정 취소</button></div></div>';
+  }
   if(p.ruleDel){
     const r=(S.rules||[]).find(x=>x.id===p.ruleDel);if(!r)return '';
     return '<div class="prop"><b style="font-size:15px">이 규칙 지울까?</b><div class="slot" style="grid-template-columns:1fr"><div><div style="font-weight:700">'+esc(r.text)+'</div><div class="muted">'+esc(ruleDesc(r))+'</div></div></div><div class="row"><button class="btn" style="flex:1" data-a="delRuleOk">응, 지워줘</button><button class="btn ghost" style="flex:1" data-a="cancelProp">아니</button></div></div>';
@@ -1239,8 +1289,8 @@ function renderProp(){
     return '<div class="prop"><b style="font-size:15px">이 규칙 추가할까?</b><div class="slot" style="grid-template-columns:1fr"><div><div style="font-weight:700">'+esc(r.text)+'</div><div class="muted">'+esc(ruleDesc(r))+'</div></div></div><div class="muted">나중에 "규칙 보여줘", "OO 규칙 지워줘"라고 말하면 바꿀 수 있어.</div><div class="row"><button class="btn" style="flex:1" data-a="approveRule">응, 추가해줘</button><button class="btn ghost" style="flex:1" data-a="cancelProp">아니</button></div></div>';
   }
   if(p.event){
-    const e=p.event;
-    return '<div class="prop"><b style="font-size:15px">여기에 넣을까?</b>'+(e.start?renderChangeWeek([{kind:'to',date:e.date,start:e.start,end:e.end,label:e.title.slice(0,3)}]):'')+'<div class="slot"><div class="d"><span class="muted">'+DAYS[dow(e.date)]+'</span><b>'+parseYmd(e.date).getDate()+'</b></div><div><div style="font-weight:700">'+esc(e.title)+'</div><div class="muted">'+(e.allDay?'하루 종일':e.tbd?'시간 미정':e.start+'–'+e.end)+'</div></div></div><div class="row"><button class="btn" style="flex:1" data-a="approveEvent">응, 넣어줘</button><button class="btn ghost" style="flex:1" data-a="cancelProp">아니</button></div></div>';
+    const e=p.event;const gnote=e.gpush?'<div class="muted">승인하면 구글 캘린더에도 보낼게</div>':'';
+    return '<div class="prop"><b style="font-size:15px">여기에 넣을까?</b>'+(e.start?renderChangeWeek([{kind:'to',date:e.date,start:e.start,end:e.end,label:e.title.slice(0,3)}]):'')+'<div class="slot"><div class="d"><span class="muted">'+DAYS[dow(e.date)]+'</span><b>'+parseYmd(e.date).getDate()+'</b></div><div><div style="font-weight:700">'+esc(e.title)+'</div><div class="muted">'+(e.allDay?'하루 종일':e.tbd?'시간 미정':e.start+'–'+e.end)+'</div></div></div>'+gnote+'<div class="row"><button class="btn" style="flex:1" data-a="approveEvent">응, 넣어줘</button><button class="btn ghost" style="flex:1" data-a="cancelProp">아니</button></div></div>';
   }
   if(!p.options.length)return '<div class="prop"><b style="font-size:12px;color:var(--accent)">배치안</b><div class="why">'+esc(p.note)+'</div><div class="row"><button class="btn ghost" style="flex:1" data-a="cancelProp">닫기</button></div></div>';
   const o=p.options[p.idx];
@@ -1275,7 +1325,7 @@ function renderForm(){
 function renderDovis(){
   const msgs=S.chat.slice(-40).map(m=>'<div class="msg '+(m.who==='me'?'me':'bot')+'">'+esc(m.text)+'</div>').join('');
   const pool=S.pool.length?'<div class="card"><h2>배치 안 된 할 일</h2>'+S.pool.map(p=>'<div class="li"><div><div style="font-weight:700;font-size:14px">'+esc(p.title)+'</div><div class="muted">'+durText(p.durationMin)+' · 마감 '+dayLabel(p.deadline)+'</div></div><div class="row"><button class="btn sm" data-a="placePool" data-id="'+p.id+'">배치</button><button class="btn sm ghost" data-a="delPool" data-id="'+p.id+'" aria-label="삭제">삭제</button></div></div>').join('')+'</div>':'';
-  return '<div class="top"><div class="row" style="gap:12px"><div style="width:40px;height:40px;border-radius:12px;background:var(--accent);display:flex;align-items:center;justify-content:center">'+LOGO('#fff','var(--accent)',30)+'</div><div><h1 style="font-size:18px;margin:0">DOVIS</h1>'+(ui.ai===false?'<div class="muted">규칙 기반 모드</div>':'')+'</div></div><button class="btn sm '+(ui.form?'':'soft')+'" data-a="toggleForm">'+(ui.form?'닫기':'+ 직접 입력')+'</button></div>'+
+  return '<div class="top"><div class="row" style="gap:12px"><div style="width:40px;height:40px;border-radius:12px;background:var(--accent);display:flex;align-items:center;justify-content:center">'+LOGO('#fff','var(--accent)',30)+'</div><div><h1 style="font-size:18px;margin:0">DOVIS</h1>'+(function(){const st=aiStatus();return '<button class="muted" style="border:none;background:none;padding:0;display:flex;align-items:center;gap:5px;font-size:12px;text-align:left" data-a="tab" data-t="setup" aria-label="'+esc(st.t)+'"><span style="width:7px;height:7px;border-radius:4px;background:'+st.c+';flex:none"></span>'+esc(st.t)+'</button>';})()+'</div></div><button class="btn sm '+(ui.form?'':'soft')+'" data-a="toggleForm">'+(ui.form?'닫기':'+ 직접 입력')+'</button></div>'+
   '<div class="scroll">'+renderForm()+pool+'<div class="msgs">'+msgs+(ui.busy?'<div class="msg bot"><div class="typing"><i></i><i></i><i></i></div></div>':'')+'</div>'+renderProp()+'</div>'+
   '<div class="composer"><div class="qs"><button data-a="quick" data-v="이번 주 빈 시간 알려줘">이번 주 빈 시간</button><button data-a="quick" data-v="오늘 남은 일정 알려줘">오늘 남은 일정</button><button data-a="quick" data-v="다음 주 운동 시간 잡아줘">다음 주 운동 잡기</button></div>'+
   '<form id="chatform"><label for="chatin" class="sr">DOVIS에게 메시지</label><input id="chatin" autocomplete="off" placeholder="예) 약분 보고서 3시간, 금요일까지"'+(ui.busy?' disabled':'')+'><button class="send" type="submit" aria-label="보내기"'+(ui.busy?' disabled':'')+'>'+I.up+'</button></form></div>';
@@ -1433,7 +1483,8 @@ function renderSettings(){
   const tog=(k,label,sub)=>'<div class="li"><div><div style="font-size:14px;font-weight:500">'+label+'</div><div class="muted">'+sub+'</div></div><button class="tog '+(s.rules[k]?'on':'')+'" data-a="rule" data-k="'+k+'" aria-pressed="'+!!s.rules[k]+'" aria-label="'+label+'"><i></i></button></div>';
   const fx=DAYS.map((d,i)=>{const l=S.fixed.filter(f=>f.day===i);return l.length?'<div class="li" style="align-items:flex-start"><b style="width:24px">'+d+'</b><div style="flex:1;font-size:13px;line-height:1.6">'+l.map(f=>esc(f.start+'–'+f.end+' '+f.title)+(f.mode==='check'?' <span class="muted">(매주 확인)</span>':f.mode==='usuallyOff'?' <span class="muted">(보통 휴강)</span>':'')).join('<br>')+'</div></div>':'';}).join('');
   return '<div class="top"><div><h1>설정</h1><div class="muted">'+syncText()+'</div></div></div><div class="scroll">'+
-  renderAccount()+
+  renderAccount()+renderWidgetCard()+
+  (function(){const g=gState();return '<div class="card"><h2>구글 캘린더</h2><div class="li"><div><div style="font-size:14px;font-weight:600">새 일정 불러올지 물어보기</div><div class="muted">'+(g.allowRead?'켜짐 · 새 일정이 생기면 하루 탭에서 물어봐':'꺼짐 · 구글 캘린더를 안 봐')+'</div></div><button class="tog '+(g.allowRead?'on':'')+'" data-a="gReadToggle" aria-pressed="'+!!g.allowRead+'" aria-label="구글 캘린더 불러오기"><i></i></button></div><div class="muted" style="line-height:1.5">DOVIS → 구글은 일정 화면의 "구글 캘린더에 보내기"를 누르거나, 대화에서 "구글 캘린더에도 넣어줘"라고 할 때만 보내.</div></div>';})()+
   '<div class="card"><h2>테마 색상</h2><div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;justify-items:center">'+cs.map(c=>'<button class="sw" data-a="accent" data-v="'+c[1]+'" aria-label="'+c[0]+'" style="background:'+c[1]+';box-shadow:0 0 0 2px '+(s.accent===c[1]?c[1]:'transparent')+'"></button>').join('')+'</div>'+
   '<div class="li"><span style="font-size:14px">다크 모드</span><button class="tog '+(s.dark?'on':'')+'" data-a="dark" aria-pressed="'+s.dark+'" aria-label="다크 모드"><i></i></button></div></div>'+
   (function(){const has=!!lsGet(GKEY);const cl=!STANDALONE;return '<div class="card"><h2>AI 연결</h2>'+
@@ -1571,6 +1622,15 @@ async function fbPush(force){
   catch(e){fbStatus='저장 실패: '+String((e&&e.message)||e).slice(0,60);}
 }
 function fbSoon(){if(!fbUser)return;clearTimeout(fbPushT);fbPushT=setTimeout(fbPush,1500);}
+function renderWidgetCard(){
+  if(NATIVE){
+    const v=nCall('appVersion')||'';
+    return '<div class="card" style="gap:10px"><h2>홈 화면 위젯</h2><div class="muted">설치형 앱'+(v?' '+esc(v):'')+' · 누르면 홈 화면에 바로 추가할지 물어봐</div>'+
+      '<div class="row wrap"><button class="btn sm soft" data-a="pinW" data-k="today">오늘 요약</button><button class="btn sm soft" data-a="pinW" data-k="week">주간 달력</button><button class="btn sm soft" data-a="pinW" data-k="command">명령 (4×1)</button></div></div>';
+  }
+  if(!STANDALONE)return '';
+  return '<div class="card" style="gap:8px"><h2>홈 화면 위젯</h2><div class="muted" style="line-height:1.5">지금 쓰는 건 크롬으로 연 DOVIS라서 위젯이 없어. 위젯은 설치형 앱(APK)에서만 돼.</div><a class="btn sm soft" style="align-self:flex-start;display:inline-flex;align-items:center;text-decoration:none" href="https://github.com/awesomedohyeon/DOVIS/releases" target="_blank" rel="noopener">설치형 앱 받으러 가기</a></div>';
+}
 function renderAccount(){
   if(!FIREBASE_CONFIG)return '<div class="card"><h2>계정</h2><div class="muted" style="line-height:1.5">구글 로그인으로 폰·패드 데이터를 같이 쓰는 기능이야. 지금은 준비 중이고 곧 켜져.</div></div>';
   if(!fbUser)return '<div class="card"><h2>계정</h2><div class="muted" style="line-height:1.5">구글로 로그인하면 폰·패드에서 같은 일정을 써. 로그인 안 하면 이 기기에만 저장돼.</div>'+(fbStatus?'<div class="muted">'+esc(fbStatus)+'</div>':'')+'<button class="btn" data-a="fbIn">구글로 로그인</button></div>';
@@ -1594,7 +1654,8 @@ function parseBackup(raw){
 }
 /* ---------- 업데이트 내역 ---------- */
 const CHANGELOG=[
- {v:'0.2.1',d:'11/10',t:'백업 가져오기 개선',items:['폰에서 복사하다 바뀐 따옴표·앞뒤 글자·줄바꿈을 알아서 정리','백업 파일(.txt)에서 바로 불러오기','가져오기 실패하면 왜 안 되는지(잘림 등) 알려줌']},
+ {v:'0.2.2',d:'11/14',t:'모아서 한 번에',items:['앱 아이콘에서 사라졌던 체크 표시 복구 + 로고 조금 크게','DOVIS 탭 위쪽에 AI 연결 상태 표시 (연결됨 · 쉬는 중 · 응답 실패 · 키 없음)','AI가 말로만 "바꿨어" 하고 실제로 안 바꾸는 문제 막기 (다시 물어보고, 그래도 안 되면 솔직하게 알림)','하루 탭에서 운동·아침 체크리스트 뺌 (주간에만)','확인·수정 필요: 하나씩 [배치] + 맨 아래 채팅으로 한꺼번에 처리','마감 지난 일도 배치: "하루 늦었지만 오늘까지 완성하는 걸로 할까? 아니면 일정 취소할까?" 물어봄','DOVIS 한마디를 짧게: "오늘은 아빠 생신이고, 저녁엔 초등학교 모임이 있어!" + 빈 시간 추천·할 일만 항목으로 (취침 시간은 뺌)','설정에서 홈 화면 위젯 바로 추가 (오늘 요약·주간 달력·명령)','크롬으로 연 DOVIS에서는 위젯이 왜 없는지, 앱 받는 곳 안내','구글 캘린더에서 불러온 일정도 삭제 가능: "구글에서도 삭제 / DOVIS에서만" 물어봄 (반복 일정은 DOVIS에서만)']},
+ {v:'0.2.1',d:'11/13',t:'구글 캘린더는 허락받고',items:['명령 위젯(4×1·5×1): 누르면 바로 DOVIS에게 말하기','DOVIS 한마디를 항목으로 정리해서 읽기 쉽게','구글 캘린더는 처음에 허락받은 경우에만 확인','새 일정은 바로 넣지 않고 "불러올까? 몇 시부터 몇 시까지로 할까?" 물어봄','DOVIS → 구글은 "구글 캘린더에 보내기"를 누르거나 대화에서 말한 일정만','설정에 구글 캘린더 불러오기 켜기/끄기','백업 가져오기 개선: 따옴표·줄바꿈 자동 정리, 백업 파일(.txt)에서 바로 불러오기, 실패 이유 안내']},
  {v:'0.2.0',d:'11/10',t:'진짜 앱이 되다',items:['안드로이드 앱(APK) 출시: 홈 화면 위젯 2개 (오늘 요약 · 주간 달력)','아침 기상 시간에 맞춰 오늘 요약·할 일 알림','폰 캘린더와 양방향 연동 (DOVIS → 구글은 특별한 일정만)','패드 화면: 왼쪽 메뉴 + 오른쪽 DOVIS 대화, 하루 탭 두 칸','구글 로그인·폰↔패드 동기화 준비 (곧 켜짐)','하루 탭: 오늘 일정을 한 줄로 ("4시까지 수업 → 운동(1.5h) → 저녁 → 과외")','DOVIS 한마디가 친구처럼 하루를 시간 순서대로 설명','할 일 체크 목록: 완료했어 / 내일 할게 / 기타(직접 적기), 일정에 묶어서 알림','주의할 점은 시간이 촉박할 때만 + 옮길 자리 제안, 나머지는 조언으로','대화로 규칙 추가·확인·삭제, "앞 일정 끝나고 30분 여유" 같은 여유 시간 규칙','시작 화면: 파란 배경 + 하얀 로고 + DOVIS','설정 정리 + 업데이트 내역, 체감 버튼 숨김, DOVIS 탭 빨간 숫자 없앰','화면·탭 바 고정, 버튼 글자 줄바꿈 수정']},
  {v:'0.1.11',d:'11/10',t:'AI 사용량 아끼기',items:['한도를 다 쓴 모델은 다시 찰 때까지 건너뜀','기본 모델을 무료 한도가 큰 2.5 Flash-Lite로','질문 하나에 요청 하나 (느릴 때만 한 번 더)']},
  {v:'0.1.10',d:'11/10',t:'사용량 오류 바로잡기',items:['무료 사용량 초과를 결제 문제로 잘못 알려주던 것 수정','다 쓴 모델 대신 다른 모델로 넘어가기']},
@@ -1657,6 +1718,7 @@ function renderSheet(){
   }
   if(sh.step==='edit')acts=renderEditForm(e);
   else if(sh.step!=='reason'&&sh.step!=='postpone'&&e.source!=='google')acts+='<button class="btn soft" data-a="edit">수정하기</button>';
+  if(sh.step!=='edit'&&sh.step!=='reason'&&sh.step!=='postpone'&&!e.recurring&&e.source!=='google'&&!e.gid&&S.events.some(x=>x.id===e.id))acts+='<button class="btn ghost" data-a="gpushToggle" data-id="'+e.id+'">'+(e.gpush?'구글 캘린더에서 빼기':'구글 캘린더에 보내기')+'</button>';
   const label=e.kind==='task'?'할 일 · '+TYPES[e.type]:(CATS[e.cat]||'일정')+(e.recurring?' · 매주':'');
   return '<div class="overlay"><button class="bgclose" data-a="closeSheet" aria-label="닫기"></button><div class="sheet" role="dialog" aria-label="'+esc(e.title)+'"><div class="handle"></div><div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:12px;font-weight:700;color:var(--accent)">'+label+'</div><h3>'+esc(e.title)+(e.kind==='task'&&taskState(e)==='need'&&sh.step!=='reason'?' 했어?':'')+'</h3><div class="muted" style="font-size:13px">'+dayLabel(e.date)+' '+time+(e.place?' · '+PLACES[e.place]:'')+(e.deadline?' · 마감 '+dayLabel(e.deadline):'')+'</div></div>'+acts+'</div></div>';
 }
@@ -1696,7 +1758,24 @@ function markMiss(id,reason){
   }
   commit({silent:true});showToast(msg);
 }
+function lateDeadline(task){
+  // 마감 전엔 자리가 없을 때: 오늘부터 가장 빨리 넣을 수 있는 날 찾기
+  const n=nowInfo();
+  for(let i=0;i<10;i++){const d=addDays(n.date,i);if(d<=task.deadline&&task.deadline>=n.date)continue;
+    const p=makeProposal(Object.assign({},task,{deadline:d,from:task.from&&task.from>n.date?task.from:undefined}));if(p.options.length)return d;}
+  return null;
+}
 function openPropFor(task,intro){
+  const n0=nowInfo();
+  if(task.deadline<n0.date||!makeProposal(task).options.length){
+    const nd=lateDeadline(task);ui.tab=layoutMode()==='wide'?ui.tab:'dovis';
+    if(intro)botSay(intro);
+    const nm=task.title.replace(/\s*\(.*?\)\s*/g,' ').replace(/\s*[①②③]\s*$/,'').trim();
+    const late=nd?daysBetween(task.deadline,nd):0;
+    const ask=nd?(task.deadline<n0.date||late>0?'원래 '+josa(nm,'은','는')+' '+dayLabel(task.deadline).replace(/^\d+\/\d+/,'').replace(/[()]/g,'')+'요일까지 완성이야. '+(late>0?(late===1?'하루':late+'일')+' 늦었지만 ':'')+(nd===n0.date?'오늘':dayLabel(nd))+'까지 완성하는 걸로 할까? 아니면 그냥 일정 취소할까?':'')
+      :'원래 '+josa(nm,'은','는')+' '+dayLabel(task.deadline)+'까지인데, 앞으로 열흘 안에도 '+durText(task.durationMin)+' 넣을 자리가 없어. 일정 취소할까, 아니면 어떻게 할지 말해줘.';
+    ui.prop={late:{task,nd}};botSay(ask+'\n다르게 하고 싶으면 채팅으로 말해줘. 예) "토요일 오후에 1시간만 넣어줘"');ui.scrollBottom=true;commit();return;
+  }
   const p=makeProposal(task);ui.prop=p;ui.tab='dovis';
   if(intro)botSay(intro);
   if(p.options.length)botSay(p.note?p.note:(p.options[0].kind==='single'?'"'+task.title+'" '+durText(task.durationMin)+' 한 번에 넣을 자리 찾았어. 이렇게 어때?':'이렇게 나눠서 넣는 건 어때?'));
@@ -1835,7 +1914,7 @@ function scheduleWorkouts(weekStart){
   for(let i=0;i<5;i++){const d=addDays(weekStart,i);if(d<n.date)continue;if(blockedDay(d))continue;if(S.events.some(e=>e.date===d&&e.type==='workout'))continue;list.push({title:'운동',short:'운동',durationMin:90,deadline:d,from:d,type:'workout',allowSplit:false,place:'gym'});}
   return list;
 }
-async function handleChat(text,quick){
+async function handleChat(text,quick,extraCtx){
   text=text.trim();if(!text)return;
   S.chat.push({id:'m'+uid(),who:'me',text});ui.draft='';ui.prop=null;ui.busy=true;ui.scrollBottom=true;commit();
   try{
@@ -1848,11 +1927,17 @@ async function handleChat(text,quick){
       botSay('아직 AI가 연결 안 돼 있어서 그 말은 이해 못 했어. 설정 → AI 연결에 Gemini 키를 넣으면 자유롭게 말할 수 있어! 지금은 "약분 보고서 3시간, 금요일까지"처럼 말하거나 위의 직접 입력을 써줘.');
       ui.busy=false;ui.scrollBottom=true;commit();return;
     }
-    const res=await sample.json(buildPrompt(text),{modelTier:'default'});
+    let res=await sample.json(buildPrompt((extraCtx||"")+text),{modelTier:'default'});
+    ui.aiLast={ok:true,at:Date.now()};
+    // 말로만 "바꿨어/넣었어" 하고 실제로는 아무것도 안 한 답이면 한 번 더 물어봄
+    if(res&&(res.action==='answer'||!res.action)&&/(바꿨|옮겼|추가했|넣었|지웠|취소했|수정했|삭제했|변경했|잡았)/.test(String(res.reply||''))){
+      try{const r2=await sample.json(buildPrompt((extraCtx||"")+text)+'\n\n주의: 방금 너는 "'+String(res.reply).slice(0,80)+'"라고만 답하고 실제로는 아무것도 바꾸지 않았어. 앱은 action으로만 바꿀 수 있어. 요청을 처리하는 action(change/add_event/add_task 등)으로 다시 JSON을 줘. 정말 바꿀 게 없으면 answer로 "아직 바꾼 건 없어"라고 솔직하게 말해.',{modelTier:'default'});if(r2&&r2.action&&r2.action!=='answer')res=r2;else if(r2)res=Object.assign({},r2,{reply:String(r2.reply||'')});}catch(e){}
+      if(res&&(res.action==='answer'||!res.action)&&/(바꿨|옮겼|추가했|넣었|지웠|취소했|수정했|삭제했|변경했|잡았)/.test(String(res.reply||'')))res.reply=String(res.reply)+'\n(⚠️ 근데 아직 실제로 바뀐 건 없어. 미리보기가 안 떴으면 다시 말해줘!)';
+    }
     ui.busy=false;
     applyAI(res,text);
   }catch(err){
-    ui.busy=false;
+    ui.busy=false;ui.aiLast={ok:false,at:Date.now(),msg:err&&err.code==='rate_limited'?'사용량 한도':err&&err.code==='timeout'?'응답 늦음':'연결 오류'};
     const pre=S.chat.length;
     const lh=localIntent(text);
     if(lh&&lh.handled){const m=S.chat[S.chat.length-1];if(S.chat.length>pre&&m&&m.who==='bot')m.text='AI가 지금 안 돼서 내가 알아들은 대로 했어. 틀리면 아니 눌러줘!\n'+m.text;ui.scrollBottom=true;commit();return;}
@@ -1952,6 +2037,18 @@ function geminiSampler(key){
   f.provider='gemini';
   return f;
 }
+function aiStatus(){
+  // DOVIS 탭 위쪽에 보여줄 AI 연결 상태
+  if(window.claude&&window.claude.use&&ui.ai!==false)return {c:'var(--ok)',t:'AI 연결됨 · Claude'};
+  const key=lsGet(GKEY);
+  if(!key)return {c:'var(--sub)',t:'AI 연결 안 됨 · 눌러서 키 넣기'};
+  let list=[];try{list=JSON.parse(lsGet('dovis-gemini-models')||'[]');}catch(e){}
+  const cool=geminiCool();const now=Date.now();const free=list.filter(m=>!(cool[m]>now));
+  if(list.length&&!free.length){const t=Math.min(...Object.values(cool).filter(v=>v>now));return {c:'#E8590C',t:'AI 쉬는 중 · '+coolText(t)};}
+  if(ui.aiLast&&ui.aiLast.ok===false&&Date.now()-ui.aiLast.at<10*60000)return {c:'var(--danger)',t:'AI 응답 실패 · '+String(ui.aiLast.msg||'').slice(0,24)};
+  const m=(lsGet(GMODEL)||'Gemini').replace(/^gemini-/,'Gemini ').replace(/flash-lite/,'Flash-Lite').replace(/flash/,'Flash').replace(/pro/,'Pro');
+  return {c:'var(--ok)',t:'AI 연결됨 · '+m};
+}
 function getSample(){
   if(samplePromise)return samplePromise;
   const key=lsGet(GKEY);
@@ -2014,9 +2111,9 @@ function localEvent(text){
   const ds=textDates(text);if(ds.length!==1)return null;
   let start=null,end=null;
   const rg=text.match(/(오전|오후|아침|낮|저녁|밤)?\s*(\d{1,2})\s*시\s*(반)?\s*(?:~|-|부터)\s*(오전|오후|아침|낮|저녁|밤)?\s*(\d{1,2})\s*시\s*(반)?/);
-  if(rg){start=parseHour((rg[1]||'')+rg[2]+'시'+(rg[3]||''));end=parseHour((rg[4]||'')+rg[5]+'시'+(rg[6]||''));if(start!=null&&end!=null&&end<=start)end+=720;if(start<420&&!rg[1])start+=720,end+=end<start?720:0;}
+  if(rg){start=parseHour((rg[1]||'')+rg[2]+'시'+(rg[3]||''));end=parseHour((rg[4]||'')+rg[5]+'시'+(rg[6]||''));if(start!=null&&end!=null&&end<=start)end+=720;if(start<540&&!rg[1])start+=720,end+=end<start?720:0;}
   else{const one=text.match(/(오전|오후|아침|낮|저녁|밤)?\s*(\d{1,2})\s*시\s*(반)?/);
-    if(one){start=parseHour((one[1]||'')+one[2]+'시'+(one[3]||''));if(!one[1]&&start<420)start+=720;end=start+60;}
+    if(one){start=parseHour((one[1]||'')+one[2]+'시'+(one[3]||''));if(!one[1]&&start<540)start+=720;end=start+60;}
     else if(/오전|아침/.test(text)){start=540;end=720;}else if(/오후|낮/.test(text)){start=780;end=1080;}else if(/저녁|밤/.test(text)){start=1080;end=1260;}}
   const title=text.replace(/오늘|내일|모레|(다음\s*주\s*)?[월화수목금토일]요일|\d{1,2}\s*[\/월]\s*\d{1,2}일?|\d{1,2}일/g,' ').replace(/(오전|오후|아침|낮|저녁|밤)?\s*\d{1,2}\s*시\s*(반)?\s*(~|-|부터)?\s*(오전|오후|아침|낮|저녁|밤)?\s*(\d{1,2}\s*시\s*(반)?)?(까지)?/g,' ').replace(/오전|오후|아침|낮|저녁|밤|에|있어|있음|일정|추가|넣어줘|넣어/g,' ').replace(/\s+/g,' ').trim();
   if(!title||title.length>14||title.split(' ').length>3)return null;
@@ -2052,6 +2149,10 @@ function localIntent(text,force){
     botSay(buffer||block?'이건 일정이 아니라 규칙이네! 이렇게 넣을게, 확인해줘.':'규칙으로 넣을게. 앱이 자동으로 지키긴 어려운 내용이라 대화·조언에 반영할게.');
     return {handled:true};
   }
+  const pk=x=>String(x).replace(/[\s()①②③]/g,'');
+  const pm=(S.pool||[]).filter(p=>{const k=pk(p.title);return k.split(/[·,]/).some(w=>w.length>=2&&pk(text).includes(w))||['정리본','보고서','과제'].some(w=>k.includes(w)&&text.includes(w));});
+  if(pm.length){const ds=textDates(text);const p0=pm[0];const from=ds[0]&&ds[0]>=n.date?ds[0]:undefined;
+    ui.busy=false;openPropFor(Object.assign({},p0,{poolId:p0.id,from,deadline:from&&from>p0.deadline?from:p0.deadline}),pm.length>1?'하나씩 넣을게. 먼저 "'+p0.title+'"부터!':null);return {handled:true};}
   const le=localEvent(text);
   if(le){ui.prop={event:le};ui.busy=false;botSay(dayLabel(le.date)+' '+(le.start?le.start+'–'+le.end:'시간 미정')+' "'+le.title+'" 넣을까?');return {handled:true};}
   const lc=localCancel(text);
@@ -2110,12 +2211,14 @@ function buildPrompt(text){
   (recent?'최근 대화:\n'+recent+'\n':'')+
   '사용자의 새 메시지: "'+text+'"\n\n'+
   '다음 형식의 JSON 객체 하나만 출력해:\n'+
-  '{"action":"add_task"|"add_event"|"block_time"|"change"|"add_rule"|"remove_rule"|"add_todo"|"answer","reply":"사용자에게 할 말(반말, 2~4문장)","changes":[{"op":"cancel|restore|delete|edit","id":"#뒤의 id 그대로","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","title":"","cat":"class|drum|work|friend|etc"}],"task":{"title":"","durationMin":0,"deadline":"YYYY-MM-DD","type":"study|practice|workout|etc","allowSplit":true},"todo":{"title":"","due":"YYYY-MM-DD"},"rule":{"text":"규칙 한 줄 요약","block":null,"buffer":null,"id":"지울 규칙 #뒤 id"},"event":{"title":"","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","cat":"class|drum|work|friend|etc","allDay":false,"tbd":false}}\n'+
+  '{"action":"add_task"|"add_event"|"block_time"|"change"|"add_rule"|"remove_rule"|"add_todo"|"answer","reply":"사용자에게 할 말(반말, 2~4문장)","changes":[{"op":"cancel|restore|delete|edit","id":"#뒤의 id 그대로","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","title":"","cat":"class|drum|work|friend|etc"}],"task":{"from":"YYYY-MM-DD(이날부터 넣고 싶으면, 없으면 빈칸)","title":"","durationMin":0,"deadline":"YYYY-MM-DD","type":"study|practice|workout|etc","allowSplit":true},"todo":{"title":"","due":"YYYY-MM-DD"},"rule":{"text":"규칙 한 줄 요약","block":null,"buffer":null,"id":"지울 규칙 #뒤 id"},"event":{"title":"","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","cat":"class|drum|work|friend|etc","toGoogle":false,"allDay":false,"tbd":false}}\n'+
   '- 해야 할 일·과제·연습처럼 시간을 찾아 넣어야 하면 add_task. 걸리는 시간을 말 안 했으면 합리적으로 추정하고 reply에 추정했다고 말해. 마감을 말 안 했으면 7일 뒤.\n'+
   '- 날짜와 시간이 정해진 약속·수업·일정이면 add_event. 시간을 모르면 tbd true, 하루 종일이면 allDay true.\n'+
   '- title에는 일정 이름만 짧게 넣어(예: "동집 약속"). 색·종류·이유 같은 부탁은 title에 넣지 말고 해당 필드로 반영해. cat: 수업 class, 드럼·합주 drum, 과외·학원 work, 친구 약속·모임·개인 약속 friend, 그 밖은 etc. "색 다르게"처럼 구분해달라고 하면 그 성격에 맞는 cat으로 넣고 reply에 어떤 색으로 넣었는지 말해. 기존 일정 색·종류를 바꾸라면 change op "edit"에 cat.\n'+
   '- "항상", "앞으로", "매번", "~할 때는"처럼 앞으로 계속 지킬 방식·조건을 말하면 일정이나 할 일을 만들지 말고 add_rule. rule.text는 규칙을 짧게 요약, 특정 요일·시간대에 넣지 말라는 거면 rule.block={"days":[월=0…일=6],"start":"HH:MM","end":"HH:MM"}, 어떤 할 일을 다른 일정 직후에 잡을 때 이동·여유 시간을 두라는 거면 rule.buffer={"types":["practice"(드럼·연습)|"study"(과제·공부)|"workout"(운동)|"etc"|"all"],"min":분}. 앱이 못 따르는 규칙이면 둘 다 null로 두고 reply에 대화·조언에만 반영한다고 말해.\n'+
   '- 시간을 따로 잡을 필요 없는 짧은 일(강의 틀어놓기, 제출, 신청, 연락, 챙기기 등)이나 "할 일에 넣어줘"라고 하면 add_todo. todo.title은 짧게, todo.due는 그날까지(말 안 했으면 오늘). 걸리는 시간이 길어서 시간표에 자리가 필요하면 add_task.\n'+
+  '- 구글 캘린더는 사용자 직접 말할 때만: "구글 캘린더에도 넣어줘/보내줘"라고 하면 event.toGoogle=true, 아니면 항상 false.\n'+
+  '- 앱에서 실제로 바뀌는 건 action(change/add_event/add_task/add_todo/add_rule…)을 줬을 때뿐이야. answer로 답하면서 "바꿨어/넣었어/옮겼어"라고 말하면 절대 안 돼. 바꿔달라는 요청이면 꼭 해당 action을 줘(앱이 미리보기를 띄우고 사용자 승인해).\n'+
   '- 기존 규칙을 지우거나 그만하라고 하면 remove_rule, rule.id에 위 규칙의 # 뒤 id를 그대로.\n'+
   '- 특정 시간을 비워달라고 하면 block_time (event 필드에 그 시간, title은 "비워두기"나 이유).\n'+
   '- 기존 일정을 휴강·취소하면 change에 op "cancel", 되돌리면 "restore", 지우면 "delete", 날짜·시간·이름을 바꾸면 "edit"(바꿀 값만 채우기). id는 위 일정 목록의 # 뒤 값을 정확히 복사. 여러 개면 changes에 여러 개.\n'+
@@ -2141,6 +2244,9 @@ function applyAI(res,text){
   if(res.action==='add_task'&&res.task&&res.task.durationMin>0){
     const t=res.task;const n=nowInfo();
     const task={title:String(t.title||'할 일').slice(0,30),durationMin:Math.max(15,Math.min(600,Math.round(t.durationMin/15)*15)),deadline:/^\d{4}-\d{2}-\d{2}$/.test(t.deadline||'')&&t.deadline>=n.date?t.deadline:addDays(n.date,7),type:TYPES[t.type]?t.type:'study',allowSplit:t.allowSplit!==false};
+    if(/^\d{4}-\d{2}-\d{2}$/.test(t.from||'')&&t.from>=n.date){task.from=t.from;if(task.deadline<t.from)task.deadline=t.from;}
+    const key=x=>String(x).replace(/[\s()①②③]/g,'');const pm=(S.pool||[]).find(p=>key(p.title).includes(key(task.title))||key(task.title).includes(key(p.title)));
+    if(pm){task.poolId=pm.id;task.title=pm.title;task.type=pm.type||task.type;if(!t.durationMin)task.durationMin=pm.durationMin;}
     openPropFor(task,reply||null);return;
   }
   if(res.action==='change'&&Array.isArray(res.changes)&&res.changes.length){
@@ -2150,6 +2256,7 @@ function applyAI(res,text){
   if((res.action==='add_event'||res.action==='block_time')&&res.event&&/^\d{4}-\d{2}-\d{2}$/.test(res.event.date||'')){
     const e=res.event;
     const ev={title:String(e.title||(res.action==='block_time'?'비워두기':'일정')).slice(0,30),date:e.date,start:e.allDay||e.tbd?null:e.start,end:e.allDay||e.tbd?null:e.end,cat:CATS[e.cat]?e.cat:'etc',allDay:!!e.allDay,tbd:!!e.tbd,place:'other'};
+    if(e.toGoogle===true||/구글|google/i.test(text||''))ev.gpush=true;
     if(!ev.allDay&&!ev.tbd&&!(/^\d{2}:\d{2}$/.test(ev.start||'')&&/^\d{2}:\d{2}$/.test(ev.end||'')&&ev.end>ev.start)){ev.tbd=true;ev.start=ev.end=null;}
     if(reply)botSay(reply);
     ui.prop={event:ev};ui.scrollBottom=true;commit();return;
@@ -2282,7 +2389,16 @@ document.addEventListener('click',ev=>{
     {S.confirm[el.dataset.key]=el.dataset.v;if(S.unsure)delete S.unsure[el.dataset.key];ui.sheet=null;afterChange([el.dataset.key.split(':')[0]]);commit({silent:true});showToast(el.dataset.v==='on'?'있는 걸로 반영했어':'휴강으로 반영했어. 그 시간 비워둘게');break;}
     case 'skip':{const d=el.dataset.date,id=el.dataset.id;const l=S.skips[d]=S.skips[d]||[];const i=l.indexOf(id);if(i>=0)l.splice(i,1);else l.push(id);ui.sheet=null;afterChange([d]);commit();break;}
     case 'cancelEv':{const e=S.events.find(x=>x.id===el.dataset.id);if(e)e.cancelled=!e.cancelled;ui.sheet=null;if(e)afterChange([e.date]);commit();break;}
-    case 'delEv':{const e=S.events.find(x=>x.id===el.dataset.id);S.events=S.events.filter(x=>x.id!==el.dataset.id);ui.sheet=null;if(e)afterChange([e.date]);commit();break;}
+    case 'delEv':{const e=S.events.find(x=>x.id===el.dataset.id);
+      if(e&&e.gid){ui.delId=e.id;ui.sheet=null;
+        ui.dialog=e.grecur?{title:'"'+e.title+'" 지울까?',body:'구글 캘린더에서 반복되는 일정이라, 구글 쪽은 구글 캘린더 앱에서 지워줘. 여기서는 DOVIS에서만 지울게.',ok:'DOVIS에서만 삭제',okAction:'delEvD'}
+          :{title:'"'+e.title+'" 지울까?',body:'구글 캘린더에서 불러온 일정이야.\n구글 캘린더에서도 지울까, DOVIS에서만 지울까?',ok:'구글에서도 삭제',okAction:'delEvG',alt:'DOVIS에서만',altAction:'delEvD'};
+        render();break;}
+      S.events=S.events.filter(x=>x.id!==el.dataset.id);ui.sheet=null;if(e)afterChange([e.date]);commit();break;}
+    case 'delEvD':{const e=S.events.find(x=>x.id===ui.delId);ui.dialog=null;ui.delId=null;if(!e){render();break;}S.events=S.events.filter(x=>x.id!==e.id);afterChange([e.date]);commit();showToast('DOVIS에서만 지웠어. 구글 캘린더엔 그대로 있어');break;}
+    case 'delEvG':{const e=S.events.find(x=>x.id===ui.delId);ui.dialog=null;ui.delId=null;if(!e){render();break;}
+      S.events=S.events.filter(x=>x.id!==e.id);afterChange([e.date]);commit();
+      deleteFromGoogle(e).then(ok=>showToast(ok?'구글 캘린더에서도 지웠어':'DOVIS에선 지웠는데 구글 쪽은 못 지웠어. 구글 캘린더 앱에서 지워줘'));break;}
     case 'applySuggest':{const g=ui.suggest;if(!g)break;g.changes.forEach(applyChange);ui.suggest=null;botSay('제안대로 옮겼어: '+g.changes.map(c=>dayLabel(c.date)+' '+(c.ev.short||c.ev.title)+' '+c.start).join(', '));commit({silent:true});showToast('옮겼어!');break;}
     case 'dismissSuggest':ui.suggest=null;render();break;
     case 'replan':postponeTask(el.dataset.id,'auto');break;
@@ -2302,8 +2418,10 @@ document.addEventListener('click',ev=>{
     case 'cancelProp':ui.prop=null;ui.queue=null;botSay('알겠어, 안 넣을게.');commit();break;
     case 'applyChanges':{const cs=ui.prop.changes;cs.forEach(applyChange);ui.prop=null;afterChange(cs.flatMap(c=>[c.ev.date,c.date]));botSay(cs.length+'개 바꿨어! '+cs.map(c=>md(c.ev.date)+' '+(c.ev.short||c.ev.title)).join(', '));ui.scrollBottom=true;commit();break;}
     case 'delRuleOk':{const id=ui.prop.ruleDel;const r=(S.rules||[]).find(x=>x.id===id);S.rules=(S.rules||[]).filter(x=>x.id!==id);ui.prop=null;afterChange([...Array(7)].map((_,i)=>addDays(n.date,i)));botSay('지웠어! '+(r?'"'+r.text+'" 규칙은 이제 안 지켜.':''));ui.scrollBottom=true;commit();break;}
+    case 'lateOk':{const L=ui.prop&&ui.prop.late;if(!L||!L.nd)break;const t=Object.assign({},L.task,{deadline:L.nd});if(t.poolId){const pp=S.pool.find(x=>x.id===t.poolId);if(pp)pp.deadline=L.nd;}ui.prop=null;botSay('좋아, '+(L.nd===n.date?'오늘':dayLabel(L.nd))+'까지로 바꿨어. 자리 찾아볼게!');openPropFor(t);break;}
+    case 'lateCancel':{const L=ui.prop&&ui.prop.late;if(!L)break;if(L.task.poolId)S.pool=S.pool.filter(x=>x.id!==L.task.poolId);ui.prop=null;botSay('"'+L.task.title+'" 취소했어.');ui.scrollBottom=true;commit();break;}
     case 'approveRule':{const r=ui.prop.rule;const rr=saveRule(r.text,r);ui.prop=null;botSay('규칙 추가했어! '+(rr.block||rr.buffer?ruleDesc(rr).replace('적용: ','')+'. 앞으로 배치할 때 이렇게 할게.':'대화랑 조언에 반영할게.'));ui.scrollBottom=true;commit();break;}
-    case 'approveEvent':{const e=ui.prop.event;S.events.push(Object.assign({id:'e'+uid(),kind:'fixed',short:e.title.slice(0,8)},e));ui.prop=null;botSay('추가했어! '+dayLabel(e.date)+' '+(e.allDay?'하루 종일':e.tbd?'시간 미정':e.start+'–'+e.end)+' '+e.title);ui.scrollBottom=true;commit();break;}
+    case 'approveEvent':{const e=ui.prop.event;S.events.push(Object.assign({id:'e'+uid(),kind:'fixed',short:e.title.slice(0,8)},e));ui.prop=null;botSay('추가했어! '+dayLabel(e.date)+' '+(e.allDay?'하루 종일':e.tbd?'시간 미정':e.start+'–'+e.end)+' '+e.title+(e.gpush?' · 구글 캘린더에도 보낼게':''));ui.scrollBottom=true;commit();if(e.gpush)gcalSync();break;}
     case 'placePool':{const p=S.pool.find(x=>x.id===el.dataset.id);if(p){ui.form=false;openPropFor(Object.assign({},p,{poolId:p.id}));}break;}
     case 'delPool':S.pool=S.pool.filter(x=>x.id!==el.dataset.id);commit();break;
     case 'quick':handleChat(el.dataset.v,true);break;
@@ -2320,7 +2438,20 @@ document.addEventListener('click',ev=>{
     case 'resetAsk':ui.dialog={title:'처음 상태로 초기화할까?',body:'지금까지의 체크, 메모, 추가한 일정이 모두 사라져.\n폰·패드 모두에 적용돼.',ok:'초기화',okAction:'reset',danger:true};render();break;
     case 'reset':S=seed();ui.dialog=null;ui.prop=null;commit();showToast('초기화했어');break;
     case 'closeDialog':ui.dialog=null;render();break;
+    case 'gAllow':{const g=gState();g.allowRead=true;g.on=true;commit({silent:true,noSync:true});if(NATIVE)nCall('requestCalendar');startGImport();showToast('좋아! 새 일정 생기면 불러올지 물어볼게');render();break;}
+    case 'gDeny':{const g=gState();g.askedRead=true;commit({silent:true,noSync:true});showToast('알겠어. 구글 캘린더는 안 볼게');render();break;}
+    case 'gReadToggle':{const g=gState();g.allowRead=!g.allowRead;g.askedRead=true;if(!g.allowRead){stopGImport();g.pending=[];}else{if(NATIVE)nCall('requestCalendar');startGImport();}commit({silent:true,noSync:true});render();break;}
+    case 'gpAdd':{const g=gState();const k=el.dataset.k;const p=g.pending.find(x=>gpKey(x)===k);if(!p)break;const i=el.dataset.i;
+      const si=document.getElementById('gps'+i),ei=document.getElementById('gpe'+i);const st=si?si.value:'',en=ei?ei.value:'';
+      if((st&&!en)||(!st&&en)||(st&&en&&en<=st)){showToast('시작이랑 끝 시간을 다시 봐줘');break;}
+      const ev={id:'e'+uid(),date:p.date,start:st||null,end:en||null,title:p.title,short:p.title.slice(0,6),cat:'etc',place:'other',kind:'fixed',gid:p.gid,grecur:!!p.grecur};
+      if(!st)ev.allDay=true;S.events.push(ev);
+      (S.gseen||(S.gseen={}))[k]=1;g.pending=g.pending.filter(x=>gpKey(x)!==k);
+      afterChange([p.date]);commit({silent:true,noSync:true});showToast('불러왔어! '+dayLabel(p.date)+' '+(st?st+'–'+en:'종일')+' '+p.title);render();break;}
+    case 'gpNo':{const g=gState();const k=el.dataset.k;(S.gseen||(S.gseen={}))[k]=1;g.pending=g.pending.filter(x=>gpKey(x)!==k);commit({silent:true,noSync:true});render();break;}
+    case 'gpushToggle':{const e=S.events.find(x=>x.id===el.dataset.id);if(!e)break;e.gpush=!e.gpush;commit({silent:true});showToast(e.gpush?'구글 캘린더에 보낼게':'구글 캘린더에서 뺄게');gcalSync();render();break;}
     case 'fbIn':fbSignIn();break;
+    case 'pinW':{const r=nCall('pinWidget',el.dataset.k);showToast(r==='1'?'홈 화면에 추가할지 물어보는 창이 떴을 거야':'이 폰은 바로 추가가 안 돼. 홈 화면 길게 누르기 → 위젯 → DOVIS에서 골라줘');break;}
     case 'fbOut':fbSignOut();break;
     case 'fbUseCloud':{const c=ui.fbPending;ui.dialog=null;ui.fbPending=null;if(c&&c.json)applyCloud(c.json);if(fbUser)lsSet('dovis-fb-linked-'+fbUser.uid,'1');fbStatus='계정 데이터로 바꿨어';fbListen();nativeSoon();render();break;}
     case 'fbUseLocal':{ui.dialog=null;ui.fbPending=null;if(fbUser)lsSet('dovis-fb-linked-'+fbUser.uid,'1');fbPush(true).then(()=>{fbStatus='이 기기 데이터를 계정에 올렸어';fbListen();});render();break;}
@@ -2349,6 +2480,7 @@ document.addEventListener('submit',ev=>{
     openPropFor({title,durationMin:ui.fDur,deadline:g['deadline'].value,type,allowSplit:ui.fSplit||!S.settings.rules.preferSingle});
     return;
   }
+  if(f.id==='fixchat'){const v=g['t'].value.trim();if(!v)return;const ctxT='(확인·수정 필요 목록: '+S.pool.map(p=>p.title+' '+durText(p.durationMin)+' 마감 '+p.deadline).join(', ')+') ';if(layoutMode()!=='wide')ui.tab='dovis';ui.scrollBottom=true;render();handleChat(v,false,ctxT);return;}
   if(f.id==='todoform'){const v=g['t'].value.trim();if(!v)return;const p=parseTodoText(v);const d=f.dataset.d;const due=p.due===nowInfo().date&&d>nowInfo().date?d:p.due;addTodo(p.title,due);commit({silent:true});setTimeout(()=>{const i=document.getElementById('todoin');if(i)i.focus();},30);return;}
   if(f.id==='todonoteform'){const v=g['v'].value.trim();const t=todos().find(x=>x.id===f.dataset.id);if(t&&v){const ds=textDates(v);if(ds[0])t.due=ds[0];t.note=v.slice(0,40);const ln=todoLink(t);showToast(ln?dayLabel(t.due)+' '+(ln.short||ln.title)+' 때 같이 알려줄게':'적어뒀어. '+dayLabel(t.due)+' 하루 탭에 띄울게');}ui.todoNote=null;commit({silent:true});return;}
   if(f.id==='gkeyform'){saveGeminiKey(g['k'].value);return;}
@@ -2407,7 +2539,7 @@ let rsT=null,lastLM=layoutMode();window.addEventListener('resize',()=>{clearTime
 setInterval(()=>{if(!ui.sheet&&!ui.dialog&&ui.tab!=='dovis'&&ui.tab!=='wrap'&&ui.tab!=='setup'){const sc=document.activeElement;if(!sc||sc===document.body)render();}},60000);
 initCloud();
 if(STANDALONE&&'serviceWorker' in navigator&&location.protocol==='https:'){try{navigator.serviceWorker.register('./sw.js').catch(()=>{});}catch(e){}}
-setTimeout(()=>{if(gState().on){gcalSync();startGImport();}},3000);
+setTimeout(()=>{const g=gState();if(g.allowRead)startGImport();if((S.events||[]).some(e=>e.gpush)||Object.keys(g.map).length)gcalSync();},3000);
 if(NATIVE){nCall('requestNotifications');nativeSoon();}
 if(FIREBASE_CONFIG)fbLoad().catch(()=>{});
 setTimeout(()=>{const sp=document.getElementById('splash');if(sp&&sp.style&&sp.remove){sp.style.opacity='0';setTimeout(()=>sp.remove(),400);}},700);
