@@ -280,7 +280,7 @@ function seed(){
 const LS_KEY='dovis-state-v1';
 let S=null;
 function loadLocal(){try{const raw=localStorage.getItem(LS_KEY);if(raw)return JSON.parse(raw);}catch(e){}return null;}
-const VERSION='0.2.4';const BUILD='수정2';
+const VERSION='0.2.4';const BUILD='수정3';
 const STANDALONE=!(window.claude&&window.claude.use);
 function emptySeed(){const x=seed();x.fixed=[];x.events=[];x.skips={};x.confirm={};x.feel={};x.feelDow={};x.feelRef={};x.recurring={hyunsaFrom:'2099-01-05'};x.chat=[{id:'m0',who:'bot',text:'안녕! 나 DOVIS야.\n설정 → 데이터 → "백업 붙여넣기"로 기존 일정을 옮기거나, 여기서 할 일과 일정을 말해줘.'}];x.v=5;return x;}
 S=loadLocal()||(STANDALONE&&location.protocol!=='file:'&&!/claude/.test(location.hostname)?emptySeed():seed());
@@ -719,7 +719,7 @@ const NATIVE=(typeof window!=='undefined'&&window.DovisNative)?window.DovisNativ
 function nCall(fn,...a){try{if(NATIVE&&typeof NATIVE[fn]==='function')return NATIVE[fn](...a.map(x=>typeof x==='string'?x:JSON.stringify(x)));}catch(e){}return null;}
 const nativeWaiters={};
 window.dovisNativeEvent=function(type,data){
-  if(type==='resume'){render();nativeImport();nativeSoon();weatherRefresh();}
+  if(type==='resume'){render();nativeImport();nativeSoon();weatherRefresh();checkUpdate();}
   if(type==='open'&&data){ui.tab=data==='week'?'week':data==='dovis'?'dovis':'today';if(ui.tab==='today')ui.date=nowInfo().date;render();}
   if(type==='say'&&data){if(layoutMode()!=='wide')ui.tab='dovis';ui.scrollBottom=true;render();handleChat(String(data));}
   if(type==='calendarPermission'&&data==='1'){nativeImport();gcalSync();}
@@ -2885,7 +2885,24 @@ initCloud();
 if(STANDALONE&&'serviceWorker' in navigator&&location.protocol==='https:'){try{navigator.serviceWorker.register('./sw.js').catch(()=>{});}catch(e){}}
 setTimeout(()=>{const g=gState();if(g.allowRead)startGImport();if((S.events||[]).some(e=>e.gpush)||Object.keys(g.map).length)gcalSync();},3000);
 if(NATIVE){nCall('requestNotifications');nativeSoon();}
-setTimeout(()=>weatherRefresh(),1200);setInterval(()=>weatherRefresh(),3*3600e3);
+setTimeout(()=>weatherRefresh(),1200);
+/* 새 버전 올라왔으면 알아서 바꾸기 (앱이 예전 파일을 붙잡고 있을 때 대비) */
+let updChecking=false;
+async function checkUpdate(){
+  if(updChecking||location.protocol!=='https:')return;updChecking=true;
+  try{
+    const t=await (await fetch('./index.html?check='+Date.now(),{cache:'no-store'})).text();
+    const v=(t.match(/const VERSION='([^']*)'/)||[])[1],b=(t.match(/const BUILD='([^']*)'/)||[])[1];
+    if(v&&(v!==VERSION||(b&&b!==BUILD))){
+      showToast('새 버전('+v+(b?' '+b:'')+')으로 바꾸는 중…');
+      try{await fetch('./',{cache:'reload'});await fetch('./index.html',{cache:'reload'});}catch(e){}
+      try{if(navigator.serviceWorker){const rs=await navigator.serviceWorker.getRegistrations();await Promise.all(rs.map(r=>r.update()));}}catch(e){}
+      setTimeout(()=>location.reload(),900);return;
+    }
+  }catch(e){}
+  updChecking=false;
+}
+setTimeout(checkUpdate,2500);setInterval(()=>weatherRefresh(),3*3600e3);
 if(FIREBASE_CONFIG)fbLoad().catch(()=>{});
 setTimeout(()=>{const sp=document.getElementById('splash');if(sp&&sp.style&&sp.remove){sp.style.opacity='0';setTimeout(()=>sp.remove(),400);}},700);
 </script>
