@@ -97,7 +97,16 @@ nav.tabs .nb{position:absolute;top:8px;left:calc(50% + 6px);min-width:16px;heigh
 .wk-hr div{position:absolute;left:0}
 .blk{position:absolute;left:2px;right:2px;border-radius:6px;padding:3px;font-size:10px;line-height:1.2;overflow:hidden;text-align:left;border:none;display:flex;flex-direction:column;gap:2px;align-items:flex-start}
 .blk.fx{color:#fff}
-.blk.off{background:var(--chip)!important;color:var(--sub)!important;text-decoration:line-through}
+.blk.ln-outline,.blk.ln-dashed{background:var(--card)!important;border:1.5px solid var(--c);color:var(--text)}
+.blk.ln-dashed{border-style:dashed}
+.blk.ln-fill{background:var(--c)!important;border:none;color:#fff}
+.ev.ln-outline{background:var(--card)!important;border:1.5px solid var(--c)}
+.ev.ln-dashed{background:var(--card)!important;border:1.5px dashed var(--c)}
+.ev.ln-fill{background:color-mix(in srgb,var(--c) 18%,var(--card))!important;border:none}
+.swc{width:32px;height:32px;border-radius:16px;border:none;flex:none}
+.swc.on{box-shadow:0 0 0 2px var(--card),0 0 0 4px var(--text)}
+.blk{z-index:1}
+.blk.off{background:var(--chip)!important;color:var(--sub)!important;text-decoration:line-through;z-index:0;opacity:.75}
 .blk.tk{background:var(--card);border:1.5px solid var(--c);color:var(--text);font-weight:700}
 .blk.tk.done{background:color-mix(in srgb,var(--c) 14%,var(--card))}
 .blk.tk.miss{border-color:var(--border);background:var(--chip);color:var(--sub);text-decoration:line-through;font-weight:400}
@@ -271,7 +280,7 @@ function seed(){
 const LS_KEY='dovis-state-v1';
 let S=null;
 function loadLocal(){try{const raw=localStorage.getItem(LS_KEY);if(raw)return JSON.parse(raw);}catch(e){}return null;}
-const VERSION='0.2.2';
+const VERSION='0.2.3';
 const STANDALONE=!(window.claude&&window.claude.use);
 function emptySeed(){const x=seed();x.fixed=[];x.events=[];x.skips={};x.confirm={};x.feel={};x.feelDow={};x.feelRef={};x.recurring={hyunsaFrom:'2099-01-05'};x.chat=[{id:'m0',who:'bot',text:'안녕! 나 DOVIS야.\n설정 → 데이터 → "백업 붙여넣기"로 기존 일정을 옮기거나, 여기서 할 일과 일정을 말해줘.'}];x.v=5;return x;}
 S=loadLocal()||(STANDALONE&&location.protocol!=='file:'&&!/claude/.test(location.hostname)?emptySeed():seed());
@@ -287,6 +296,7 @@ function migrate(){
   S.v=2;return true;
 }
 function migrate3(){let ch=false;if((S.v||1)<3){if(S.gsync)S.gsync.sleep=false;S.v=3;ch=true;}if(S.v<4){if(S.gsync){S.gsync.push=false;S.gsync.map={};S.gsync.status='';}S.v=4;ch=true;}
+  if(S.v<5){S.feelDow=Object.assign({0:'busy',1:'busy',2:'ok',3:'ok',4:'some'},S.feelDow||{});S.feel=Object.assign({'2026-11-09':'busy','2026-11-10':'busy','2026-11-11':'ok','2026-11-12':'ok','2026-11-13':'some'},S.feel||{});S.feelRef=Object.assign({0:4,1:0,2:1,3:0,4:3},S.feelRef||{});S.v=5;ch=true;}
   return ch;}
 const ui={tab:'today',todayMode:'day',date:nowInfo().date,week:weekStart(nowInfo().date),sheet:null,prop:null,busy:false,form:false,formKind:'task',
   fDur:120,fType:'study',fSplit:true,draft:'',advice:null,adviceBusy:false,toast:null,dialog:null,sync:'local',reasonFor:null};
@@ -359,7 +369,11 @@ function eventsOn(date){
       out.push(Object.assign({},f,{uid:'f:'+f.id+':'+date,fid:f.id,date,kind:'fixed',recurring:true,state}));
     }
   }
-  for(const e of S.events)if(e.date===date)out.push(Object.assign({},e,{uid:e.id,state:e.cancelled?'off':'on'}));
+  for(const e of S.events){
+    const multi=e.endDate&&e.endDate>e.date&&e.start&&e.end;
+    if(e.date===date){out.push(Object.assign({},e,{uid:e.id,state:e.cancelled?'off':'on'},multi?{end:'23:59',title:e.title+' (1일차)',short:(e.short||e.title)+'①',spanEnd:e.endDate,realEnd:e.end}:{}));continue;}
+    if(multi&&e.date<date&&date<=e.endDate){const k=daysBetween(e.date,date)+1;out.push(Object.assign({},e,{uid:e.id,date,state:e.cancelled?'off':'on',start:'00:00',end:date===e.endDate?e.end:'23:59',title:e.title+' ('+k+'일차)',short:(e.short||e.title)+(k===2?'②':k===3?'③':''),cont:true,realDate:e.date}));}
+  }
   for(const e of (S.gimported||[]))if(e.date===date)out.push(Object.assign({},e,{uid:e.id,state:'on'}));
   const key=e=>(e.allDay||e.tbd)?-1:toMin(e.start);
   return out.sort((a,b)=>key(a)-key(b));
@@ -553,7 +567,29 @@ const stIcon=(st,c)=>{
   if(st==='need')return '<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="'+c+'" stroke-width="1.8"/></svg>';
   return '<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="#ADB5BD" stroke-width="1.4" stroke-dasharray="2 2"/></svg>';
 };
-function catColor(cat){return cat==='friend'?'var(--friend)':cat==='drum'?'var(--drum)':cat==='work'?'var(--work)':cat==='etc'?'var(--etc)':'var(--accent)';}
+function evSpanText(e){if(e.allDay)return dayLabel(e.date)+' 하루 종일';if(e.tbd)return dayLabel(e.date)+' 시간 미정';if(e.endDate&&e.endDate>e.date)return dayLabel(e.date)+' '+e.start+' → '+dayLabel(e.endDate)+' '+e.end;return dayLabel(e.date)+' '+e.start+'–'+e.end;}
+const PALETTE=[['#3B5BDB','파랑'],['#6741D9','보라'],['#D6336C','분홍'],['#C2410C','주황'],['#E8590C','귤색'],['#2B8A3E','초록'],['#0B7285','청록'],['#495057','회색']];
+function colorName(c){const v=getComputedAccent(c);const f=PALETTE.find(p=>p[0].toLowerCase()===String(v).toLowerCase());return f?f[1]:'';}
+function sw(c){return '<span style="display:inline-block;width:12px;height:12px;border-radius:6px;background:'+c+';vertical-align:-1px"></span>';}
+function sameColor(a,b){return String(getComputedAccent(a)).toLowerCase()===String(getComputedAccent(b)).toLowerCase();}
+// 바꾼 색과 똑같은 색인 다른 일정(앞으로 2주) 찾기 → 헷갈리니까 바꾸자고 제안
+function colorClashes(color,skip){
+  const n=nowInfo();const seen={};const out=[];
+  for(let i=0;i<14;i++){const d=addDays(n.date,i);eventsOn(d).forEach(e=>{if(e.state==='off'||skip(e))return;if(!sameColor(evColor(e),color))return;const k=e.recurring?'f:'+e.fid:(e.title.replace(/\s*\(\d일차\)$/,''));if(seen[k])return;seen[k]=1;out.push({key:k,uid:e.uid,id:e.id,fid:e.fid,recurring:!!e.recurring,cat:e.cat,title:e.title.replace(/\s*\(\d일차\)$/,''),date:e.date});});}
+  return out.slice(0,4);
+}
+function freeColors(used){const u=used.map(x=>String(getComputedAccent(x)).toLowerCase());const all=PALETTE.map(p=>p[0]).filter(c=>!u.includes(c.toLowerCase()));
+  const inUse=new Set();for(let i=0;i<14;i++)eventsOn(addDays(nowInfo().date,i)).forEach(e=>inUse.add(String(getComputedAccent(evColor(e))).toLowerCase()));
+  return all.sort((a,b)=>(inUse.has(a.toLowerCase())?1:0)-(inUse.has(b.toLowerCase())?1:0)).slice(0,3);}
+function clashPropose(color,clashes,why){
+  if(!clashes.length)return;
+  const opts=freeColors([color]);
+  ui.prop={clash:{color,items:clashes,opts}};
+  botSay(why+'\n근데 '+clashes.map(c=>dayLabel(c.date)+' '+c.title).join(', ')+josa(clashes[clashes.length-1].title,'도','도').slice(-1)+' 같은 '+(colorName(color)||'')+'색이라 헷갈릴 수 있어. 다른 색으로 바꿀까?');
+}
+function lnClass(e){return e.line?' ln-'+e.line:'';}
+function evColor(e){if(e.color)return e.color;return e.kind==='task'?taskColor(e):catColor(e.cat);}
+function catColor(cat){if(S.catColors&&S.catColors[cat])return S.catColors[cat];return cat==='friend'?'var(--friend)':cat==='drum'?'var(--drum)':cat==='work'?'var(--work)':cat==='etc'?'var(--etc)':'var(--accent)';}
 function taskColor(e){return e.type==='practice'?'var(--drum)':e.type==='workout'?'var(--ok)':e.type==='etc'?'var(--etc)':'var(--accent)';}
 function taskState(e){
   if(e.status==='done')return 'done';if(e.status==='miss')return 'miss';
@@ -683,7 +719,7 @@ const NATIVE=(typeof window!=='undefined'&&window.DovisNative)?window.DovisNativ
 function nCall(fn,...a){try{if(NATIVE&&typeof NATIVE[fn]==='function')return NATIVE[fn](...a.map(x=>typeof x==='string'?x:JSON.stringify(x)));}catch(e){}return null;}
 const nativeWaiters={};
 window.dovisNativeEvent=function(type,data){
-  if(type==='resume'){render();nativeImport();nativeSoon();}
+  if(type==='resume'){render();nativeImport();nativeSoon();weatherRefresh();}
   if(type==='open'&&data){ui.tab=data==='week'?'week':data==='dovis'?'dovis':'today';if(ui.tab==='today')ui.date=nowInfo().date;render();}
   if(type==='say'&&data){if(layoutMode()!=='wide')ui.tab='dovis';ui.scrollBottom=true;render();handleChat(String(data));}
   if(type==='calendarPermission'&&data==='1'){nativeImport();gcalSync();}
@@ -700,11 +736,100 @@ function widgetData(){
   const todays=[one(d,true),one(addDays(d,1),false)];
   const ws=weekStart(d);const days=[];
   for(let i=0;i<7;i++){const dd=addDays(ws,i);days.push({date:dd,dow:DAYS[i===0?6:i-1]||'',day:parseYmd(dd).getDate(),isToday:dd===d,
-    items:eventsOn(dd).filter(e=>isTimed(e)&&e.state!=='off'&&!(e.kind==='task'&&e.status==='miss')).map(e=>({s:toMin(e.start),e:toMin(e.end),t:e.short||e.title,c:e.kind==='task'?getComputedAccent(taskColor(e)):getComputedAccent(catColor(e.cat)),task:e.kind==='task'?1:0,done:e.status==='done'?1:0})),
+    items:eventsOn(dd).filter(e=>isTimed(e)&&e.state!=='off'&&!(e.kind==='task'&&e.status==='miss')).map(e=>({s:toMin(e.start),e:toMin(e.end),t:e.short||e.title,c:getComputedAccent(evColor(e)),task:(e.line?e.line!=='fill':e.kind==='task')?1:0,dash:e.line==='dashed'?1:0,done:e.status==='done'?1:0})),
     allDay:eventsOn(dd).filter(e=>!isTimed(e)&&e.state!=='off').map(e=>e.short||e.title)});}
   return {todays,week:{start:ws,title:md(ws)+' – '+md(addDays(ws,6)),days,accent:S.settings.accent}};
 }
 function getComputedAccent(v){const m=String(v).match(/var\((--[a-z0-9]+)\)/);if(!m)return v;try{const c=getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim();if(c)return c;}catch(e){}return {'--accent':S.settings.accent,'--drum':'#6741D9','--work':'#C2410C','--etc':'#0B7285','--friend':'#D6336C','--ok':'#2B8A3E'}[m[1]]||'#3B5BDB';}
+/* ================= 날씨 (Open-Meteo, 키 필요 없음) ================= */
+const WX_LOC={lat:35.146,lon:126.923,name:'광주'};
+let WX=null;try{WX=JSON.parse(localStorage.getItem('dovis-weather')||'null');}catch(e){}
+let wxBusy=false;
+async function weatherRefresh(force){
+  if(S.settings.weather===false||wxBusy)return;
+  if(!force&&WX&&WX.at&&Date.now()-WX.at<3*3600e3&&WX.days&&WX.days[nowInfo().date])return;
+  wxBusy=true;
+  try{
+    const u='https://api.open-meteo.com/v1/forecast?latitude='+WX_LOC.lat+'&longitude='+WX_LOC.lon+
+      '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,snowfall_sum&hourly=precipitation,snowfall'+
+      '&past_days=1&forecast_days=7&timezone=Asia%2FSeoul';
+    const r=await fetch(u);if(!r.ok)throw 0;const j=await r.json();const d=j.daily||{},h=j.hourly||{};
+    const days={};(d.time||[]).forEach((t,i)=>{days[t]={code:d.weather_code[i],max:d.temperature_2m_max[i],min:d.temperature_2m_min[i],pop:d.precipitation_probability_max[i],rain:d.precipitation_sum[i],snow:d.snowfall_sum[i],wet:[]};});
+    (h.time||[]).forEach((t,i)=>{const day=days[t.slice(0,10)];if(day&&((h.precipitation[i]||0)>=0.2||(h.snowfall[i]||0)>0))day.wet.push(+t.slice(11,13));});
+    WX={at:Date.now(),days};try{localStorage.setItem('dovis-weather',JSON.stringify(WX));}catch(e){}
+    render();nativeSoon();
+  }catch(e){}
+  wxBusy=false;
+}
+function wxWhen(hours){
+  // 비/눈 오는 시간대를 말로 (6시~23시만 봄)
+  const hs=(hours||[]).filter(x=>x>=6&&x<=23);if(!hs.length)return '';
+  const a=hs[0],b=hs[hs.length-1];
+  if(hs.length>=12||(a<=8&&b>=20))return '하루 종일';
+  const part=x=>x<12?'오전':x<18?'오후':'저녁';
+  const t=x=>(x<12?x:x===12?12:x-12)+'시';
+  if(b-a<=2)return part(a)+' '+t(a)+'쯤';
+  return part(a)+' '+t(a)+'부터 '+(part(b)===part(a)?'':part(b)+' ')+t(b+1>23?23:b+1)+'까지';
+}
+function weatherNote(date){
+  // 평범한 날은 아무 말 안 함: 비·눈·어제보다 기온이 크게 변하는 날만
+  if(S.settings.weather===false||!WX||!WX.days)return '';
+  const w=WX.days[date],y=WX.days[addDays(date,-1)];if(!w)return '';
+  const today=date===nowInfo().date,who=today?'오늘은':dayLabel(date)+'은';
+  const c=w.code||0,out=[];
+  const snowy=[71,73,75,77,85,86].includes(c)&&((w.snow||0)>=0.3||(w.pop||0)>=50);
+  const rainy=!snowy&&((c>=51&&c<=67)||(c>=80&&c<=82)||c>=95)&&((w.rain||0)>=1||(w.pop||0)>=60);
+  const when=wxWhen(w.wet);
+  if(snowy)out.push(who+' 눈 오는 하루야'+(when?' ('+when+')':'')+'. 길 미끄러우니까 운전 조심하고 일찍 나가!');
+  else if(rainy)out.push(who+' 비가 오는 하루야'+(when?' ('+when+')':'')+'. 우산 꼭 챙겨'+(c>=95?', 천둥번개도 칠 수 있대':'')+'!');
+  if(y&&w.max!=null&&y.max!=null){
+    const dMax=Math.round(w.max-y.max),dMin=Math.round(w.min-y.min);
+    const dd=Math.abs(dMax)>=Math.abs(dMin)?dMax:dMin;
+    if(dd<=-5)out.push('어제보다 '+(-dd)+'도나 떨어져서 확 추워져 (최저 '+Math.round(w.min)+'도). 따뜻하게 입어!');
+    else if(dd>=5)out.push('어제보다 '+dd+'도 정도 따뜻해져 (최고 '+Math.round(w.max)+'도). 너무 두껍게 안 입어도 돼.');
+  }
+  return out.join(' ');
+}
+
+/* ================= DOVIS 알림 (꼭 해야 할 것 콕 찌르기) ================= */
+function nudges(){if(!S.nudges)S.nudges=[];return S.nudges;}
+function autoNudgeMin(date){
+  // 그날 처음 오는 1시간 이상 빈 시간 시작 (12시 이후), 없으면 오후 6시
+  const g=gaps(date,'school').find(x=>x.e-x.s>=60&&x.s>=720);
+  return g?Math.max(g.s-10,720):1080;
+}
+function autoNudges(){
+  if(S.settings.autoNudge===false)return [];
+  const n=nowInfo(),out=[];
+  for(let i=0;i<3;i++){
+    const d=addDays(n.date,i);
+    const must=[];
+    todos().filter(t=>!t.done&&t.due===d).forEach(t=>must.push(t.title));
+    (S.pool||[]).filter(t=>t.deadline===d).forEach(t=>must.push(String(t.short||t.title).replace(/\s*\(.*\)\s*/g,' ').trim()));
+    if(!must.length)continue;
+    const m=autoNudgeMin(d);const dt=parseYmd(d);dt.setHours(Math.floor(m/60),m%60,0,0);
+    out.push({at:dt.getTime(),date:d,auto:true,text:'오늘은 꼭 '+must.slice(0,2).join(', ')+(must.length>2?' 외 '+(must.length-2)+'개':'')+' 끝내야 해!'});
+  }
+  return out;
+}
+function nudgeAlarms(){
+  const now=Date.now();
+  return nudges().filter(x=>!x.done&&x.at>now).map(x=>({at:x.at,title:'DOVIS 알림',text:x.text,ch:'nudge'}))
+    .concat(autoNudges().filter(x=>x.at>now).map(x=>({at:x.at,title:'DOVIS 알림',text:x.text,ch:'nudge'})));
+}
+function addNudge(date,time,text){
+  const n=nowInfo();
+  let d=/^\d{4}-\d{2}-\d{2}$/.test(date||'')?date:n.date;
+  let m=/^\d{1,2}:\d{2}$/.test(time||'')?toMin(time):wakeMin(d);
+  if(d===n.date&&m<=n.min)m=roundUp5(n.min+5);
+  if(m>=1440){d=addDays(d,1);m=wakeMin(d);}
+  const dt=parseYmd(d);dt.setHours(Math.floor(m/60),m%60,0,0);
+  const x={id:'n'+uid(),date:d,time:hm(m),at:dt.getTime(),text:String(text||'').slice(0,80)};
+  nudges().push(x);nudges().sort((a,b)=>a.at-b.at);
+  S.nudges=nudges().filter(y=>y.at>Date.now()-3*864e5).slice(-30);
+  return x;
+}
+function nudgesOn(date){return nudges().filter(x=>x.date===date&&!x.done);}
 function morningAlarms(){
   // 앞으로 7일, 그날 기상 시간에 맞춘 아침 알림
   const n=nowInfo();const out=[];
@@ -716,13 +841,14 @@ function morningAlarms(){
     let text=(lv?lv+' 하루':'')+(flow.length?' · '+flow.join(', '):'');
     if(td.length)text+='\n할 일: '+td.slice(0,3).map(t=>t.title).join(', ')+(td.length>3?' 외 '+(td.length-3)+'개':'');
     if(A.tight[0])text+='\n⚠️ '+A.tight[0].t;
+    const wn=weatherNote(d).replace(/^[^ ]+은 /,'');if(wn)text=wn+'\n'+text;
     const dt=parseYmd(d);dt.setHours(Math.floor(wk/60),wk%60,0,0);
     out.push({at:dt.getTime(),title:'좋은 아침! '+(dayFlow(d).length?'오늘 일정 알려줄게':'오늘은 여유로운 날이야'),text:text.trim()||'오늘은 정해진 일정이 없어. 푹 쉬어!'});
   }
   return out;
 }
 let nativeT=null;
-function nativeSoon(){if(!NATIVE)return;clearTimeout(nativeT);nativeT=setTimeout(()=>{nCall('setWidgets',widgetData());nCall('setAlarms',morningAlarms());},600);}
+function nativeSoon(){if(!NATIVE)return;clearTimeout(nativeT);nativeT=setTimeout(()=>{nCall('setWidgets',widgetData());nCall('setAlarms',morningAlarms().concat(nudgeAlarms()).sort((a,b)=>a.at-b.at));},600);}
 function nativeImport(){
   if(!NATIVE||!gState().allowRead||nCall('hasCalendarPermission')!=='1')return;
   const n=nowInfo();const from=parseYmd(addDays(n.date,-1)).getTime(),to=parseYmd(addDays(n.date,28)).getTime();
@@ -764,9 +890,10 @@ function importGoogle(p){
       let d=st.date;const last=en&&en.date?addDays(en.date,-1):st.date;let k=0;
       while(d<=last&&k<14){list.push(Object.assign({id:'g:'+it.id+':'+d,date:d,allDay:true,start:null,end:null},base));d=addDays(d,1);k++;}
     }else{
-      const endT=en&&en.date===st.date?en.time:'23:59';
-      if(endT<=st.time)return;
-      list.push(Object.assign({id:'g:'+it.id,date:st.date,start:st.time,end:endT},base));
+      const multi=en&&en.date>st.date;
+      const endT=en?en.time:'23:59';
+      if(!multi&&endT<=st.time)return;
+      list.push(Object.assign({id:'g:'+it.id,date:st.date,start:st.time,end:endT},multi?{endDate:en.date}:{},base));
     }
   });
   // 바로 넣지 않고 "불러올까? 몇 시부터 몇 시까지?" 물어볼 목록으로
@@ -776,7 +903,7 @@ function importGoogle(p){
   g.istatus='구글 캘린더 확인 · '+hm(nowInfo().min);
   g.pending=g.pending.filter(p=>p.date>=today);
   if(!fresh.length){saveQuiet();return;}
-  fresh.forEach(x=>g.pending.push({id:x.id,gid:x.gid,grecur:!!x.grecur,title:x.title,date:x.date,start:x.start,end:x.end,allDay:!!x.allDay}));
+  fresh.forEach(x=>g.pending.push({id:x.id,gid:x.gid,grecur:!!x.grecur,title:x.title,date:x.date,start:x.start,end:x.end,endDate:x.endDate,allDay:!!x.allDay}));
   // DOVIS 대화에서도 물어보기
   botSay('구글 캘린더에 새 일정이 '+fresh.length+'개 있어.\n'+fresh.slice(0,4).map(x=>'· '+x.title+' '+dayLabel(x.date)+' '+(x.allDay?'종일':x.start+'–'+x.end)).join('\n')+(fresh.length>4?'\n· 외 '+(fresh.length-4)+'개':'')+'\n불러올까? 몇 시부터 몇 시까지로 할지 아래에서 정해줘.');
   ui.prop={gpend:true};
@@ -801,8 +928,8 @@ function renderGPending(){
   return '<div class="card" style="gap:10px;border:1.5px solid var(--accent)"><div class="between"><h2>구글 캘린더에 새 일정이 있어</h2><span class="muted">'+list.length+'개</span></div><div class="muted">불러올까? 몇 시부터 몇 시까지로 할지 정해줘.</div>'+
     list.slice(0,5).map((p,i)=>'<div style="display:flex;flex-direction:column;gap:8px;padding:8px 0;border-top:1px solid var(--line2)"><div><b style="font-size:14.5px">'+esc(p.title)+'</b> <span class="muted">'+dayLabel(p.date)+(p.allDay?' · 구글엔 종일':'')+'</span></div>'+
       '<div class="row" style="gap:6px;flex-wrap:nowrap"><label class="sr" for="gps'+i+'">시작</label><input id="gps'+i+'" type="time" class="inp" style="height:38px;flex:1;min-width:0" value="'+(p.start||'')+'"><span class="muted">–</span><label class="sr" for="gpe'+i+'">끝</label><input id="gpe'+i+'" type="time" class="inp" style="height:38px;flex:1;min-width:0" value="'+(p.end||'')+'"></div>'+
-      '<div class="muted" style="font-size:12px">시간을 둘 다 비우면 종일 일정으로 넣어.</div>'+
-      '<div class="row" style="gap:6px"><button class="btn sm" style="flex:1" data-a="gpAdd" data-k="'+esc(gpKey(p))+'" data-i="'+i+'">불러오기</button><button class="btn sm ghost" style="flex:1" data-a="gpNo" data-k="'+esc(gpKey(p))+'">안 불러오기</button></div></div>').join('')+
+      '<div class="muted" style="font-size:12px">종일은 08:00–22:00로 넣어. 시간을 둘 다 비워도 종일이야.</div>'+
+      '<div class="row" style="gap:6px"><button class="btn sm" style="flex:1" data-a="gpAdd" data-k="'+esc(gpKey(p))+'" data-i="'+i+'">불러오기</button><button class="btn sm soft" style="flex:1" data-a="gpAdd" data-full="1" data-k="'+esc(gpKey(p))+'" data-i="'+i+'">종일로</button><button class="btn sm ghost" style="flex:1" data-a="gpNo" data-k="'+esc(gpKey(p))+'">안 불러오기</button></div></div>').join('')+
     (list.length>5?'<div class="muted">나머지 '+(list.length-5)+'개는 위에 거 정하면 보여줄게</div>':'')+'</div>';
 }
 function renderGConsent(){
@@ -872,18 +999,18 @@ function evCard(e){
   const time=isTimed(e)?(e.start+'–'+e.end):(e.allDay?'하루 종일':'시간 미정');
   const place=e.place&&PLACES[e.place]?' · '+PLACES[e.place]:'';
   if(e.kind==='task'){
-    const s=taskState(e);const c=taskColor(e);
+    const s=taskState(e);const c=evColor(e);
     let extra='';
     if(s==='need')extra='<div class="row"><button class="btn sm" data-a="done" data-id="'+e.id+'">했어</button><button class="btn sm ghost" data-a="missask" data-id="'+e.id+'">못했어</button></div>';
     const tag=s==='done'?'<span class="badge" style="background:var(--okbg);color:var(--okt)">완료</span>':s==='miss'?'<span class="badge" style="background:var(--chip);color:var(--sub)">못 함'+(e.reason?' · '+esc(e.reason):'')+'</span>':s==='need'?'<span class="badge">체크 필요</span>':'<span class="badge" style="background:var(--chip);color:var(--sub2)">할 일</span>';
-    return '<div class="ev task '+(s==='done'?'done':s==='miss'?'miss':s==='need'?'need':'')+'" style="--c:'+c+'"><button data-a="open" data-id="'+e.uid+'" data-date="'+e.date+'" style="all:unset;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div style="display:flex;flex-direction:column;gap:2px"><div class="tt">'+esc(e.title)+'</div><div class="st">'+time+place+'</div></div>'+tag+'</button>'+extra+'</div>';
+    return '<div class="ev task '+(s==='done'?'done':s==='miss'?'miss':s==='need'?'need':'')+lnClass(e)+'" style="--c:'+c+'"><button data-a="open" data-id="'+e.uid+'" data-date="'+e.date+'" style="all:unset;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div style="display:flex;flex-direction:column;gap:2px"><div class="tt">'+esc(e.title)+'</div><div class="st">'+time+place+'</div></div>'+tag+'</button>'+extra+'</div>';
   }
   if(e.state==='unknown'){
     return '<div class="ev unknown" style="--c:'+catColor(e.cat)+'"><div class="between"><div><div class="tt">'+esc(e.title)+'</div><div class="st">'+time+place+'</div></div><span class="badge">확인 필요</span></div><div class="row"><span class="muted">'+weekTag(e.date)+' 있어?</span><button class="btn sm" data-a="conf" data-key="'+e.date+':'+e.fid+'" data-v="on">있음</button><button class="btn sm ghost" data-a="conf" data-key="'+e.date+':'+e.fid+'" data-v="off">휴강</button><button class="btn sm ghost" data-a="conf" data-key="'+e.date+':'+e.fid+'" data-v="unsure">모름</button></div></div>';
   }
   const off=e.state==='off';
-  const bg=off?'':(e.cat==='class'?'':'style="background:color-mix(in srgb,'+catColor(e.cat)+' 12%,var(--card))"');
-  return '<button class="ev fixed '+(off?'off':'')+'" '+bg+' data-a="open" data-id="'+e.uid+'" data-date="'+e.date+'"><div class="between" style="width:100%"><div style="display:flex;flex-direction:column;gap:2px"><div class="tt">'+esc(e.title)+'</div><div class="st">'+(off?'휴강/취소 · ':'')+time+place+'</div></div><span style="color:var(--sub2)">'+(off?'':I.lock)+'</span></div></button>';
+  const bg=off?'':(e.cat==='class'&&!e.color?'style="--c:'+evColor(e)+'"':'style="--c:'+evColor(e)+';background:color-mix(in srgb,'+evColor(e)+' 12%,var(--card))"');
+  return '<button class="ev fixed '+(off?'off':'')+(off?'':lnClass(e))+'" '+bg+' data-a="open" data-id="'+e.uid+'" data-date="'+e.date+'"><div class="between" style="width:100%"><div style="display:flex;flex-direction:column;gap:2px"><div class="tt">'+esc(e.title)+'</div><div class="st">'+(off?'휴강/취소 · ':'')+time+place+'</div></div><span style="color:var(--sub2)">'+(off?'':I.lock)+'</span></div></button>';
 }
 function weekTag(d){const m0=weekStart(nowInfo().date),m=weekStart(d);const diff=daysBetween(m0,m)/7;const w=diff===0?'이번 주':diff===1?'다음 주':diff===-1?'지난주':md(m)+' 주';return w+' '+DAYS[dow(d)]+'요일('+md(d)+')';}
 function dayName(date){const n=nowInfo();if(date===n.date)return '오늘';if(date===addDays(n.date,1))return '내일';if(date===addDays(n.date,-1))return '어제';return DAYS[dow(date)]+'요일';}
@@ -974,6 +1101,8 @@ function dayStoryItems(date){
   // 짧게 항목으로: 빈 시간 추천, 다음 일정, 할 일
   const {n,isToday,timed,nm}=storyParts(date);
   const out=[];
+  const wn=weatherNote(date);if(wn)out.push(wn);
+  nudgesOn(date).forEach(x=>out.push('📌 '+x.text+' ('+x.time+' 알림)'));
   const left=isToday?timed.filter(e=>toMin(e.end)>n.min):timed;
   if(isToday&&left.length&&left.length<timed.length)out.push('다음은 '+left[0].start+' '+(left[0].type==='workout'?'운동':nm(left[0]))+'부터야.');
   // 가장 긴 빈 시간 + 뭘 하면 좋을지
@@ -1183,17 +1312,17 @@ function renderWeek(){
   let scrollTo=(9-HSTART)*HPX;
   const cols=days.map(d=>{
     let inner='';
-    eventsOn(d).filter(isTimed).forEach(e=>{
+    eventsOn(d).filter(isTimed).sort((a,b)=>(a.state==='off'?0:1)-(b.state==='off'?0:1)).forEach(e=>{
       const s=toMin(e.start),en=toMin(e.end);
       const top=(s-HSTART*60)/60*HPX,h=Math.max(16,(en-s)/60*HPX-2);
       const label=esc(e.short||e.title);
       if(e.kind==='task'){
-        const stt=taskState(e);const c=taskColor(e);
-        inner+='<button class="blk tk '+(stt==='done'?'done':stt==='miss'?'miss':stt==='need'?'need':'')+'" style="--c:'+c+';top:'+top+'px;height:'+h+'px" data-a="open" data-id="'+e.uid+'" data-date="'+d+'" aria-label="'+esc(e.title)+' '+e.start+'">'+stIcon(stt,c)+'<span>'+label+'</span></button>';
+        const stt=taskState(e);const c=evColor(e);
+        inner+='<button class="blk tk '+(stt==='done'?'done':stt==='miss'?'miss':stt==='need'?'need':'')+lnClass(e)+'" style="--c:'+c+';top:'+top+'px;height:'+h+'px" data-a="open" data-id="'+e.uid+'" data-date="'+d+'" aria-label="'+esc(e.title)+' '+e.start+'">'+stIcon(stt,c)+'<span>'+label+'</span></button>';
       }else if(e.state==='unknown'){
         inner+='<button class="blk unk" style="--c:'+catColor(e.cat)+';top:'+top+'px;height:'+h+'px" data-a="open" data-id="'+e.uid+'" data-date="'+d+'">'+label+'<span style="font-weight:700;color:var(--accent)">있어?</span></button>';
       }else{
-        inner+='<button class="blk fx '+(e.state==='off'?'off':'')+'" style="background:'+catColor(e.cat)+';top:'+top+'px;height:'+h+'px" data-a="open" data-id="'+e.uid+'" data-date="'+d+'">'+label+'</button>';
+        inner+='<button class="blk fx '+(e.state==='off'?'off':'')+lnClass(e)+'" style="--c:'+evColor(e)+';background:'+evColor(e)+';top:'+top+'px;height:'+h+'px" data-a="open" data-id="'+e.uid+'" data-date="'+d+'">'+label+'</button>';
       }
     });
     if(d===n.date&&n.min>=HSTART*60){const t=(n.min-HSTART*60)/60*HPX;inner+='<div class="nowline" style="top:'+t+'px"></div>';scrollTo=Math.max(0,t-120);}
@@ -1202,9 +1331,9 @@ function renderWeek(){
   }).join('');
   const lab=labQuestions().filter(e=>e.date>=m&&e.date<=addDays(m,6));
   return '<div class="top" style="padding-bottom:8px"><div><div class="k">'+md(m)+' – '+md(addDays(m,6))+'</div><h1>'+(parseYmd(m).getMonth()+1)+'월 '+Math.ceil(parseYmd(m).getDate()/7)+'주차</h1></div><div class="row"><button class="iconbtn" data-a="wk" data-n="-7" aria-label="이전 주">'+I.left+'</button>'+(m!==weekStart(n.date)?'<button class="btn sm ghost" data-a="wk" data-n="0">이번 주</button>':'')+'<button class="iconbtn" data-a="wk" data-n="7" aria-label="다음 주">'+I.right+'</button></div></div>'+
-  '<div style="padding:0 16px 8px" class="legend"><span class="row"><span class="dot" style="background:var(--accent)"></span>수업</span><span class="row"><span class="dot" style="background:var(--drum)"></span>드럼</span><span class="row"><span class="dot" style="background:var(--work)"></span>과외·학원</span><span class="row"><span class="dot" style="background:var(--friend)"></span>친구·약속</span><span class="row"><span class="dot" style="background:var(--etc)"></span>기타</span><span class="row"><span class="dot" style="background:var(--card);border:1.5px solid var(--sub)"></span>할 일(체크)</span></div>'+
+  '<div style="padding:0 16px 8px" class="legend"><span class="row"><span class="dot" style="background:'+catColor('class')+'"></span>수업</span><span class="row"><span class="dot" style="background:'+catColor('drum')+'"></span>드럼</span><span class="row"><span class="dot" style="background:'+catColor('work')+'"></span>과외·학원</span><span class="row"><span class="dot" style="background:'+catColor('friend')+'"></span>친구·약속</span><span class="row"><span class="dot" style="background:'+catColor('etc')+'"></span>기타</span><span class="row"><span class="dot" style="background:var(--card);border:1.5px solid var(--sub)"></span>할 일(체크)</span></div>'+
   banner+(lab.length?'<div style="margin:0 12px 8px;background:var(--card);border:1.5px dashed var(--accent);border-radius:12px;padding:8px 8px 8px 14px;display:flex;justify-content:space-between;align-items:center;gap:8px"><div style="font-size:13px">'+weekTag(lab[0].date)+' '+esc(lab[0].title)+' 있어?</div><div class="row"><button class="btn sm" data-a="conf" data-key="'+lab[0].date+':'+lab[0].fid+'" data-v="on">있음</button><button class="btn sm ghost" data-a="conf" data-key="'+lab[0].date+':'+lab[0].fid+'" data-v="off">휴강</button><button class="btn sm ghost" data-a="conf" data-key="'+lab[0].date+':'+lab[0].fid+'" data-v="unsure">모름</button></div></div>':'')+
-  '<div class="wk-head"><div></div>'+head+'</div><div class="wk-all"><div style="font-size:9px;color:var(--sub);display:flex;align-items:center">종일</div>'+all+'</div>'+
+  '<div class="wk-head"><div></div>'+head+'</div>'+
   '<div class="scroll" style="padding:6px 6px 10px;gap:0"><div data-scrollto="'+scrollTo+'"></div><div class="wk-grid"><div class="wk-hr" style="height:'+H+'px">'+hours+'</div>'+cols+'</div><div style="margin-top:10px;background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding-top:8px"><div style="padding:0 14px 4px;font-size:13px;font-weight:700">아침 · 운동</div>'+habitRows(days)+'</div></div>';
 }
 
@@ -1246,7 +1375,7 @@ function renderChangeWeek(items,hide,hp){
       items.filter(it=>it.date===d).forEach(it=>{
         if(it.kind==='from')inner+='<div style="position:absolute;left:1px;right:1px;'+pos(it.start,it.end)+'border-radius:4px;border:1.5px dashed var(--accent);background:var(--card);box-sizing:border-box;z-index:1"></div>';
         else if(it.kind==='remove')inner+='<div style="position:absolute;left:1px;right:1px;'+pos(it.start,it.end)+'border-radius:4px;border:1.5px dashed var(--danger);background:color-mix(in srgb,var(--danger) 10%,var(--card));color:var(--danger);font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;box-sizing:border-box;z-index:1">✕</div>';
-        else inner+='<div style="position:absolute;left:0;right:0;'+pos(it.start,it.end)+'border-radius:5px;background:var(--accent);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;z-index:2;box-shadow:0 0 0 2px var(--card)">'+esc(it.label||'새')+'</div>';
+        else inner+='<div style="position:absolute;left:0;right:0;'+pos(it.start,it.end)+'border-radius:5px;background:'+(it.color||'var(--accent)')+';color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;z-index:2;box-shadow:0 0 0 2px var(--card)">'+esc(it.label||'새')+'</div>';
       });
       if(d===n.date&&n.min>HS*60)inner+='<div style="position:absolute;left:0;right:0;top:'+((n.min-HS*60)/60*HP)+'px;height:2px;background:var(--danger);z-index:3"></div>';
       return '<div style="position:relative;height:'+H+'px;border-left:1px solid var(--line2);background-image:linear-gradient(var(--line2) 1px,transparent 1px);background-size:100% '+(HP*2)+'px">'+inner+'</div>';
@@ -1262,7 +1391,7 @@ function changeItems(cs){
   const items=[],hide=[];
   cs.forEach(c=>{
     const e=c.ev;
-    if(c.op==='edit'){if(isTimed(e)){items.push({kind:'from',date:e.date,start:e.start,end:e.end});hide.push(e.uid);}if(c.start)items.push({kind:'to',date:c.date,start:c.start,end:c.end,label:(c.title||e.short||e.title).slice(0,3)});}
+    if(c.op==='edit'){const moved=!(c.date===e.date&&c.start===e.start&&c.end===e.end);if(isTimed(e)){if(moved)items.push({kind:'from',date:e.date,start:e.start,end:e.end});hide.push(e.uid);}if(c.start)items.push({kind:'to',date:c.date,start:c.start,end:c.end,label:(c.title||e.short||e.title).slice(0,3),color:c.color||null});}
     else if(c.op==='cancel'||c.op==='delete'){if(isTimed(e)){items.push({kind:'remove',date:e.date,start:e.start,end:e.end});hide.push(e.uid);}}
     else if(c.op==='restore'&&isTimed(e))items.push({kind:'to',date:e.date,start:e.start,end:e.end,label:(e.short||e.title).slice(0,3)});
   });
@@ -1272,9 +1401,14 @@ function renderProp(){
   const p=ui.prop;if(!p)return '';
   if(p.changes){
     const ci=changeItems(p.changes);
-    return '<div class="prop"><b style="font-size:15px">이렇게 바꿀까?</b>'+renderChangeWeek(ci.items,ci.hide)+p.changes.map(c=>'<div class="slot"><div class="d"><span class="muted">'+DAYS[dow(c.ev.date)]+'</span><b>'+parseYmd(c.ev.date).getDate()+'</b></div><div><div style="font-weight:700">'+esc(c.ev.title)+'</div><div class="muted">'+esc(c.text)+'</div></div></div>').join('')+
+    return '<div class="prop"><b style="font-size:15px">이렇게 바꿀까?</b>'+renderChangeWeek(ci.items,ci.hide)+p.changes.map(c=>'<div class="slot"><div class="d"><span class="muted">'+DAYS[dow(c.ev.date)]+'</span><b>'+parseYmd(c.ev.date).getDate()+'</b></div><div><div style="font-weight:700">'+esc(c.ev.title)+'</div><div class="muted">'+esc(c.text)+'</div>'+(c.color?'<div class="row" style="gap:6px;font-size:13px;margin-top:2px">'+sw(c.colorFrom)+' '+esc(colorName(c.colorFrom)||'지금 색')+' <span class="muted">→</span> '+sw(c.color)+' <b>'+esc(colorName(c.color)||'새 색')+'</b></div>':'')+'</div></div>').join('')+
       '<div class="row"><button class="btn" style="flex:1" data-a="applyChanges">응, 바꿔줘</button><button class="btn ghost" style="flex:1" data-a="cancelProp">아니</button></div></div>';
   }
+  if(p.clash){const C=p.clash;
+    return '<div class="prop"><b style="font-size:15px">색 겹침</b>'+C.items.map(i=>'<div class="row" style="gap:6px;font-size:14px">'+sw(C.color)+' '+esc(dayLabel(i.date)+' '+i.title)+'</div>').join('')+
+      '<div class="muted">이걸로 바꿀까?</div><div class="row wrap" style="gap:6px">'+C.opts.map(c=>'<button class="btn sm soft" data-a="clashFix" data-c="'+c+'">'+sw(c)+' '+esc(colorName(c))+'</button>').join('')+'<button class="btn sm ghost" data-a="clashSkip">그대로 둘래</button></div></div>';}
+  if(p.catColor){const P=p.catColor;
+    return '<div class="prop"><b style="font-size:15px">'+esc(CATS[P.cat])+' 색 바꿀까?</b><div class="row" style="gap:8px;font-size:15px">'+sw(P.from)+' '+esc(colorName(P.from)||'지금 색')+' <span class="muted">→</span> '+sw(P.color)+' <b>'+esc(colorName(P.color)||'새 색')+'</b></div><div class="muted">'+esc(CATS[P.cat])+' 일정이 전부 이 색으로 바뀌어 (따로 색 정한 건 그대로)</div><div class="row"><button class="btn" style="flex:1" data-a="catColorOk">응, 바꿔줘</button><button class="btn ghost" style="flex:1" data-a="cancelProp">아니</button></div></div>';}
   if(p.gpend){const h=renderGPending();if(!h){return '';}return h.replace('class="card"','class="prop"');}
   if(p.late){
     const L=p.late;
@@ -1290,7 +1424,7 @@ function renderProp(){
   }
   if(p.event){
     const e=p.event;const gnote=e.gpush?'<div class="muted">승인하면 구글 캘린더에도 보낼게</div>':'';
-    return '<div class="prop"><b style="font-size:15px">여기에 넣을까?</b>'+(e.start?renderChangeWeek([{kind:'to',date:e.date,start:e.start,end:e.end,label:e.title.slice(0,3)}]):'')+'<div class="slot"><div class="d"><span class="muted">'+DAYS[dow(e.date)]+'</span><b>'+parseYmd(e.date).getDate()+'</b></div><div><div style="font-weight:700">'+esc(e.title)+'</div><div class="muted">'+(e.allDay?'하루 종일':e.tbd?'시간 미정':e.start+'–'+e.end)+'</div></div></div>'+gnote+'<div class="row"><button class="btn" style="flex:1" data-a="approveEvent">응, 넣어줘</button><button class="btn ghost" style="flex:1" data-a="cancelProp">아니</button></div></div>';
+    return '<div class="prop"><b style="font-size:15px">여기에 넣을까?</b>'+(e.start?renderChangeWeek((function(){if(!(e.endDate&&e.endDate>e.date))return [{kind:'to',date:e.date,start:e.start,end:e.end,label:e.title.slice(0,3)}];const it=[];let d=e.date,k=0;while(d<=e.endDate&&k<7){it.push({kind:'to',date:d,start:d===e.date?e.start:'00:00',end:d===e.endDate?e.end:'23:59',label:e.title.slice(0,3)});d=addDays(d,1);k++;}return it;})()):'')+'<div class="slot"><div class="d"><span class="muted">'+DAYS[dow(e.date)]+'</span><b>'+parseYmd(e.date).getDate()+'</b></div><div><div style="font-weight:700">'+esc(e.title)+'</div><div class="muted">'+(e.endDate&&e.endDate>e.date?e.start+' → '+dayLabel(e.endDate)+' '+e.end:e.allDay?'하루 종일':e.tbd?'시간 미정':e.start+'–'+e.end)+'</div></div></div>'+gnote+'<div class="row"><button class="btn" style="flex:1" data-a="approveEvent">응, 넣어줘</button><button class="btn ghost" style="flex:1" data-a="cancelProp">아니</button></div></div>';
   }
   if(!p.options.length)return '<div class="prop"><b style="font-size:12px;color:var(--accent)">배치안</b><div class="why">'+esc(p.note)+'</div><div class="row"><button class="btn ghost" style="flex:1" data-a="cancelProp">닫기</button></div></div>';
   const o=p.options[p.idx];
@@ -1311,6 +1445,7 @@ function renderForm(){
     '<label class="f">이름<input class="inp" name="title" required placeholder="예) 동아리 회의"></label>'+
     '<div class="grid2"><label class="f">날짜<input class="inp" type="date" name="date" value="'+n.date+'" required></label><label class="f">종류<select class="inp" name="cat"><option value="etc">기타</option><option value="class">수업</option><option value="drum">드럼</option><option value="work">과외·학원</option></select></label></div>'+
     '<div class="grid2"><label class="f">시작<input class="inp" type="time" name="start" value="12:00"></label><label class="f">끝<input class="inp" type="time" name="end" value="13:00"></label></div>'+
+    '<label class="f">끝나는 날 (다음 날 이후에 끝나면)<input class="inp" type="date" name="endDate"></label>'+
     '<div class="grid2"><label class="f">장소<select class="inp" name="place">'+Object.keys(PLACES).map(k=>'<option value="'+k+'">'+PLACES[k]+'</option>').join('')+'</select></label><label class="f">시간<select class="inp" name="mode"><option value="timed">시간 지정</option><option value="tbd">시간 미정</option><option value="allDay">하루 종일</option></select></label></div>'+
     '<button class="btn block" type="submit">추가</button></form>';
   }
@@ -1323,7 +1458,7 @@ function renderForm(){
   '<button class="btn block" type="submit">빈 시간 찾기</button></form>';
 }
 function renderDovis(){
-  const msgs=S.chat.slice(-40).map(m=>'<div class="msg '+(m.who==='me'?'me':'bot')+'">'+esc(m.text)+'</div>').join('');
+  const msgs=S.chat.slice(-40).map(m=>'<div class="msg '+(m.who==='me'?'me':'bot')+'">'+esc(m.text)+(m.sources&&m.sources.length?'<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--line2);display:flex;flex-direction:column;gap:3px;font-size:12px"><span class="muted">출처</span>'+m.sources.map(x=>'<a href="'+esc(x.uri)+'" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">· '+esc(x.title)+'</a>').join('')+'</div>':'')+'</div>').join('');
   const pool=S.pool.length?'<div class="card"><h2>배치 안 된 할 일</h2>'+S.pool.map(p=>'<div class="li"><div><div style="font-weight:700;font-size:14px">'+esc(p.title)+'</div><div class="muted">'+durText(p.durationMin)+' · 마감 '+dayLabel(p.deadline)+'</div></div><div class="row"><button class="btn sm" data-a="placePool" data-id="'+p.id+'">배치</button><button class="btn sm ghost" data-a="delPool" data-id="'+p.id+'" aria-label="삭제">삭제</button></div></div>').join('')+'</div>':'';
   return '<div class="top"><div class="row" style="gap:12px"><div style="width:40px;height:40px;border-radius:12px;background:var(--accent);display:flex;align-items:center;justify-content:center">'+LOGO('#fff','var(--accent)',30)+'</div><div><h1 style="font-size:18px;margin:0">DOVIS</h1>'+(function(){const st=aiStatus();return '<button class="muted" style="border:none;background:none;padding:0;display:flex;align-items:center;gap:5px;font-size:12px;text-align:left" data-a="tab" data-t="setup" aria-label="'+esc(st.t)+'"><span style="width:7px;height:7px;border-radius:4px;background:'+st.c+';flex:none"></span>'+esc(st.t)+'</button>';})()+'</div></div><button class="btn sm '+(ui.form?'':'soft')+'" data-a="toggleForm">'+(ui.form?'닫기':'+ 직접 입력')+'</button></div>'+
   '<div class="scroll">'+renderForm()+pool+'<div class="msgs">'+msgs+(ui.busy?'<div class="msg bot"><div class="typing"><i></i><i></i><i></i></div></div>':'')+'</div>'+renderProp()+'</div>'+
@@ -1476,6 +1611,18 @@ async function addRule(text){
   ui.ruleBusy=false;
   commit({silent:true});showToast(rr.block||rr.buffer?'규칙 추가했어! '+ruleDesc(rr).replace('적용: ',''):'규칙 추가했어! 대화랑 조언에 반영할게');
 }
+function renderNudgeCard(){
+  const s=S.settings,n=nowInfo();
+  const tg=(k,label,sub)=>'<div class="li"><div><div style="font-size:14px;font-weight:600">'+label+'</div><div class="muted">'+sub+'</div></div><button class="tog '+(s[k]!==false?'on':'')+'" data-a="setTog" data-k="'+k+'" aria-pressed="'+(s[k]!==false)+'" aria-label="'+label+'"><i></i></button></div>';
+  const list=nudges().filter(x=>!x.done&&x.at>Date.now()).map(x=>'<div class="li" style="font-size:13.5px"><div style="flex:1;min-width:0"><div>'+esc(x.text)+'</div><div class="muted">'+dayLabel(x.date)+' '+x.time+'</div></div><button class="btn sm soft" data-a="nudgeDel" data-id="'+x.id+'">지우기</button></div>').join('');
+  const wn=weatherNote(n.date);
+  return '<div class="card"><h2>알림 · 날씨</h2>'+
+    tg('autoNudge','마감 날 "꼭 해야 해" 알림','그날까지인 할 일이 남아 있으면 오후 빈 시간 시작할 때 콕 찔러줘')+
+    tg('weather','DOVIS 한마디에 날씨','비·눈 오는 날, 어제보다 5도 넘게 변하는 날만 말해줘 ('+WX_LOC.name+' 기준)')+
+    (s.weather!==false?'<div class="muted" style="font-size:12px">'+(WX&&WX.at?'오늘: '+(wn?esc(wn):'평범한 날씨라 따로 말 안 해')+' · '+new Date(WX.at).getHours()+'시 업데이트':'날씨 불러오는 중…')+'</div>':'')+
+    (list?'<b style="font-size:13px">맞춰둔 알림</b>'+list:'<div class="muted" style="font-size:12px">DOVIS 탭에서 "내일 아침에 현사남 정리본 꼭 하라고 알려줘"처럼 말하면 알림을 맞춰줘.</div>')+
+  '</div>';
+}
 function renderSettings(){
   const cs=[['블루','#3B5BDB'],['틸','#0B7285'],['퍼플','#6741D9'],['오렌지','#C2410C'],['그린','#2B8A3E'],['차콜','#343A40']];
   const s=S.settings,t=S.travel;
@@ -1483,7 +1630,7 @@ function renderSettings(){
   const tog=(k,label,sub)=>'<div class="li"><div><div style="font-size:14px;font-weight:500">'+label+'</div><div class="muted">'+sub+'</div></div><button class="tog '+(s.rules[k]?'on':'')+'" data-a="rule" data-k="'+k+'" aria-pressed="'+!!s.rules[k]+'" aria-label="'+label+'"><i></i></button></div>';
   const fx=DAYS.map((d,i)=>{const l=S.fixed.filter(f=>f.day===i);return l.length?'<div class="li" style="align-items:flex-start"><b style="width:24px">'+d+'</b><div style="flex:1;font-size:13px;line-height:1.6">'+l.map(f=>esc(f.start+'–'+f.end+' '+f.title)+(f.mode==='check'?' <span class="muted">(매주 확인)</span>':f.mode==='usuallyOff'?' <span class="muted">(보통 휴강)</span>':'')).join('<br>')+'</div></div>':'';}).join('');
   return '<div class="top"><div><h1>설정</h1><div class="muted">'+syncText()+'</div></div></div><div class="scroll">'+
-  renderAccount()+renderWidgetCard()+
+  renderAccount()+renderWidgetCard()+renderNudgeCard()+
   (function(){const g=gState();return '<div class="card"><h2>구글 캘린더</h2><div class="li"><div><div style="font-size:14px;font-weight:600">새 일정 불러올지 물어보기</div><div class="muted">'+(g.allowRead?'켜짐 · 새 일정이 생기면 하루 탭에서 물어봐':'꺼짐 · 구글 캘린더를 안 봐')+'</div></div><button class="tog '+(g.allowRead?'on':'')+'" data-a="gReadToggle" aria-pressed="'+!!g.allowRead+'" aria-label="구글 캘린더 불러오기"><i></i></button></div><div class="muted" style="line-height:1.5">DOVIS → 구글은 일정 화면의 "구글 캘린더에 보내기"를 누르거나, 대화에서 "구글 캘린더에도 넣어줘"라고 할 때만 보내.</div></div>';})()+
   '<div class="card"><h2>테마 색상</h2><div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;justify-items:center">'+cs.map(c=>'<button class="sw" data-a="accent" data-v="'+c[1]+'" aria-label="'+c[0]+'" style="background:'+c[1]+';box-shadow:0 0 0 2px '+(s.accent===c[1]?c[1]:'transparent')+'"></button>').join('')+'</div>'+
   '<div class="li"><span style="font-size:14px">다크 모드</span><button class="tog '+(s.dark?'on':'')+'" data-a="dark" aria-pressed="'+s.dark+'" aria-label="다크 모드"><i></i></button></div></div>'+
@@ -1654,6 +1801,7 @@ function parseBackup(raw){
 }
 /* ---------- 업데이트 내역 ---------- */
 const CHANGELOG=[
+ {v:'0.2.3',d:'11/16',t:'말한 대로',items:['DOVIS 알림: "내일 아침에 현사남 정리본 꼭 하라고 알려줘" 하면 그 시간에 폰 알림 (설정에서 확인·삭제)','마감 날 남은 할 일은 오후 빈 시간에 "오늘은 꼭 ~ 끝내야 해!" 알림','DOVIS 한마디에 날씨: 비·눈 오는 날, 어제보다 기온이 크게 변하는 날만 (평범한 날은 조용히)','일정 말고 궁금한 거 물어보면 구글 검색으로 찾아보고 출처랑 같이 답하기 (예: 운동하고 헌혈해도 돼?)','시간을 콕 집으면 토 달지 않고 그대로 넣기 ("지금부터 5시까지")','배치 안 된 할 일 여러 개를 하나로 합쳐서 넣기','일정 눌러서 "말로 고치기" (예: 30분 늦춰줘)','1박 2일 일정: 끝나는 날·시간 따로 넣기','구글 일정 불러올 때 [종일로] 선택 (08:00–22:00)','명령 위젯 입력창 새 디자인: 키보드 위에 붙는 카드 + 바로 쓰는 버튼(오늘 남은 일정 등)','이틀에 걸친 일정 추가 오류 수정 (밤 넘기는 일정은 자동으로 다음 날까지)','일정 눌러서 색(8가지)과 모양(채우기·실선·점선) 바꾸기','대화로 색 바꿀 때 바꾸기 전→후 색 보여주기, 종류(드럼 등) 전체 색 바꾸기','색이 겹치는 다른 일정이 있으면 "그것도 다른 색으로 바꿀까?" 제안','주간: 휴강 표시는 뒤로, 맨 위 종일 줄 없앰']},
  {v:'0.2.2',d:'11/14',t:'모아서 한 번에',items:['앱 아이콘에서 사라졌던 체크 표시 복구 + 로고 조금 크게','DOVIS 탭 위쪽에 AI 연결 상태 표시 (연결됨 · 쉬는 중 · 응답 실패 · 키 없음)','AI가 말로만 "바꿨어" 하고 실제로 안 바꾸는 문제 막기 (다시 물어보고, 그래도 안 되면 솔직하게 알림)','하루 탭에서 운동·아침 체크리스트 뺌 (주간에만)','확인·수정 필요: 하나씩 [배치] + 맨 아래 채팅으로 한꺼번에 처리','마감 지난 일도 배치: "하루 늦었지만 오늘까지 완성하는 걸로 할까? 아니면 일정 취소할까?" 물어봄','DOVIS 한마디를 짧게: "오늘은 아빠 생신이고, 저녁엔 초등학교 모임이 있어!" + 빈 시간 추천·할 일만 항목으로 (취침 시간은 뺌)','설정에서 홈 화면 위젯 바로 추가 (오늘 요약·주간 달력·명령)','크롬으로 연 DOVIS에서는 위젯이 왜 없는지, 앱 받는 곳 안내','구글 캘린더에서 불러온 일정도 삭제 가능: "구글에서도 삭제 / DOVIS에서만" 물어봄 (반복 일정은 DOVIS에서만)']},
  {v:'0.2.1',d:'11/13',t:'구글 캘린더는 허락받고',items:['명령 위젯(4×1·5×1): 누르면 바로 DOVIS에게 말하기','DOVIS 한마디를 항목으로 정리해서 읽기 쉽게','구글 캘린더는 처음에 허락받은 경우에만 확인','새 일정은 바로 넣지 않고 "불러올까? 몇 시부터 몇 시까지로 할까?" 물어봄','DOVIS → 구글은 "구글 캘린더에 보내기"를 누르거나 대화에서 말한 일정만','설정에 구글 캘린더 불러오기 켜기/끄기','백업 가져오기 개선: 따옴표·줄바꿈 자동 정리, 백업 파일(.txt)에서 바로 불러오기, 실패 이유 안내']},
  {v:'0.2.0',d:'11/10',t:'진짜 앱이 되다',items:['안드로이드 앱(APK) 출시: 홈 화면 위젯 2개 (오늘 요약 · 주간 달력)','아침 기상 시간에 맞춰 오늘 요약·할 일 알림','폰 캘린더와 양방향 연동 (DOVIS → 구글은 특별한 일정만)','패드 화면: 왼쪽 메뉴 + 오른쪽 DOVIS 대화, 하루 탭 두 칸','구글 로그인·폰↔패드 동기화 준비 (곧 켜짐)','하루 탭: 오늘 일정을 한 줄로 ("4시까지 수업 → 운동(1.5h) → 저녁 → 과외")','DOVIS 한마디가 친구처럼 하루를 시간 순서대로 설명','할 일 체크 목록: 완료했어 / 내일 할게 / 기타(직접 적기), 일정에 묶어서 알림','주의할 점은 시간이 촉박할 때만 + 옮길 자리 제안, 나머지는 조언으로','대화로 규칙 추가·확인·삭제, "앞 일정 끝나고 30분 여유" 같은 여유 시간 규칙','시작 화면: 파란 배경 + 하얀 로고 + DOVIS','설정 정리 + 업데이트 내역, 체감 버튼 숨김, DOVIS 탭 빨간 숫자 없앰','화면·탭 바 고정, 버튼 글자 줄바꿈 수정']},
@@ -1682,7 +1830,8 @@ function findEv(id,date){return eventsOn(date).find(e=>e.uid===id);}
 function renderSheet(){
   const sh=ui.sheet;const e=findEv(sh.id,sh.date);
   if(!e)return '';
-  const time=isTimed(e)?e.start+'–'+e.end:(e.allDay?'하루 종일':'시간 미정');
+  const rawM=(function(){const r=S.events.find(x=>x.id===e.id);return r&&r.endDate&&r.endDate>r.date?r:null;})();
+  const time=rawM?md(rawM.date)+' '+rawM.start+' → '+dayLabel(rawM.endDate)+' '+rawM.end:isTimed(e)?e.start+'–'+e.end:(e.allDay?'하루 종일':'시간 미정');
   let acts='';
   if(e.kind==='task'){
     const s=taskState(e);
@@ -1718,6 +1867,16 @@ function renderSheet(){
   }
   if(sh.step==='edit')acts=renderEditForm(e);
   else if(sh.step!=='reason'&&sh.step!=='postpone'&&e.source!=='google')acts+='<button class="btn soft" data-a="edit">수정하기</button>';
+  if(sh.step!=='edit'&&sh.step!=='postpone'&&sh.step!=='reason'){
+    const cur=evColor(e);const ln=e.line||(e.kind==='task'?'outline':'fill');
+    const COLS=[['var(--accent)','파랑'],['#6741D9','보라'],['#D6336C','분홍'],['#C2410C','주황'],['#E8590C','귤색'],['#2B8A3E','초록'],['#0B7285','청록'],['#495057','회색']];
+    acts+='<div style="display:flex;flex-direction:column;gap:8px;padding:6px 0 2px"><b style="font-size:13px">색 · 모양'+(e.recurring?' <span class="muted" style="font-weight:400">(매주 같이 바뀌어)</span>':'')+'</b>'+
+      '<div class="row" style="gap:8px;flex-wrap:wrap">'+COLS.map(([c,n])=>'<button class="swc'+(e.color===c||(!e.color&&cur===c)?' on':'')+'" style="background:'+c+'" data-a="evColor" data-c="'+c+'" aria-label="'+n+'"></button>').join('')+(e.color?'<button class="btn sm ghost" data-a="evColor" data-c="">기본색</button>':'')+'</div>'+
+      (ui.sheetClash?'<div style="background:var(--tint);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px;font-size:13px;line-height:1.5"><div>💡 '+esc(ui.sheetClash.items.map(i=>dayLabel(i.date)+' '+i.title).join(', '))+'도 같은 '+esc(colorName(ui.sheetClash.color))+'색이라 헷갈릴 수 있어. 그쪽을 바꿀까?</div><div class="row" style="gap:6px;flex-wrap:wrap">'+ui.sheetClash.opts.map(c=>'<button class="chip" style="height:30px" data-a="clashFix" data-c="'+c+'">'+sw(c)+' '+esc(colorName(c))+'</button>').join('')+'<button class="chip" style="height:30px" data-a="clashSkip">그대로</button></div></div>':'')+
+      '<div class="row" style="gap:6px">'+[['fill','채우기'],['outline','실선'],['dashed','점선']].map(([k,n])=>'<button class="chip'+(ln===k?' on':'')+'" style="flex:1;height:34px'+(ln===k?';background:var(--tint);color:var(--accent);font-weight:700':'')+'" data-a="evLine" data-l="'+k+'">'+n+'</button>').join('')+'</div></div>';
+  }
+  if(sh.step!=='edit'&&sh.step!=='postpone'&&sh.step!=='reason')acts+='<form id="sheetchat" class="row" style="flex-wrap:nowrap;margin-top:4px"><label class="sr" for="sheetin">말로 고치기</label><input id="sheetin" class="inp" name="t" style="height:42px;flex:1;min-width:0" placeholder="말로 고치기 예) 30분 늦춰줘, 금요일로 옮겨" autocomplete="off"><button class="btn sm">보내기</button></form>';
+
   if(sh.step!=='edit'&&sh.step!=='reason'&&sh.step!=='postpone'&&!e.recurring&&e.source!=='google'&&!e.gid&&S.events.some(x=>x.id===e.id))acts+='<button class="btn ghost" data-a="gpushToggle" data-id="'+e.id+'">'+(e.gpush?'구글 캘린더에서 빼기':'구글 캘린더에 보내기')+'</button>';
   const label=e.kind==='task'?'할 일 · '+TYPES[e.type]:(CATS[e.cat]||'일정')+(e.recurring?' · 매주':'');
   return '<div class="overlay"><button class="bgclose" data-a="closeSheet" aria-label="닫기"></button><div class="sheet" role="dialog" aria-label="'+esc(e.title)+'"><div class="handle"></div><div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:12px;font-weight:700;color:var(--accent)">'+label+'</div><h3>'+esc(e.title)+(e.kind==='task'&&taskState(e)==='need'&&sh.step!=='reason'?' 했어?':'')+'</h3><div class="muted" style="font-size:13px">'+dayLabel(e.date)+' '+time+(e.place?' · '+PLACES[e.place]:'')+(e.deadline?' · 마감 '+dayLabel(e.deadline):'')+'</div></div>'+acts+'</div></div>';
@@ -1729,7 +1888,9 @@ function renderEditForm(e){
     '<label class="f">이름<input class="inp" name="title" required value="'+esc(e.title)+'"></label>';
   if(!e.recurring)h+='<label class="f">날짜<input class="inp" type="date" name="date" required value="'+e.date+'"></label>';
   if(e.kind==='fixed'&&!e.recurring)h+='<label class="f">시간<select class="inp" name="mode"><option value="timed"'+(timed?' selected':'')+'>시간 지정</option><option value="tbd"'+(e.tbd?' selected':'')+'>시간 미정</option><option value="allDay"'+(e.allDay?' selected':'')+'>하루 종일</option></select></label>';
-  h+='<div class="grid2"><label class="f">시작<input class="inp" type="time" name="start" value="'+(e.start||'12:00')+'"></label><label class="f">끝<input class="inp" type="time" name="end" value="'+(e.end||'13:00')+'"></label></div>';
+  const x0=S.events.find(y=>y.id===e.id);const st0=x0&&x0.start||e.start,en0=x0&&x0.endDate?x0.end:(e.end);
+  h+='<div class="grid2"><label class="f">시작<input class="inp" type="time" name="start" value="'+(st0||'12:00')+'"></label><label class="f">끝<input class="inp" type="time" name="end" value="'+(en0||'13:00')+'"></label></div>';
+  if(e.kind==='fixed'&&!e.recurring)h+='<label class="f">끝나는 날 (1박 이상일 때만)<input class="inp" type="date" name="endDate" value="'+(x0&&x0.endDate||'')+'"></label><div class="muted" style="font-size:12px;margin-top:-4px">예) MT 11/20 15:00 시작 → 끝나는 날 11/21, 끝 12:00</div>';
   h+='<div class="grid2"><label class="f">장소<select class="inp" name="place">'+opt(PLACES,e.place||'other')+'</select></label>'+
     (e.kind==='task'?'<label class="f">종류<select class="inp" name="type">'+opt(TYPES,e.type)+'</select></label>':'<label class="f">종류<select class="inp" name="cat">'+opt(CATS,e.cat||'etc')+'</select></label>')+'</div>';
   if(e.kind==='task')h+='<label class="f">마감<input class="inp" type="date" name="deadline" value="'+(e.deadline||e.date)+'"></label>';
@@ -1903,7 +2064,7 @@ function approveProp(){
   o.slots.forEach((s,i)=>{
     S.events.push({id:'t'+uid(),date:s.date,start:s.start,end:s.end,title:t.title+(o.slots.length>1?' '+marks[i]:''),short:(t.short||t.title).slice(0,8)+(o.slots.length>1?marks[i]:''),type:t.type,kind:'task',status:'scheduled',place:t.place,cat:t.type==='practice'?'drum':'class',deadline:t.deadline,group:t.group});
   });
-  if(t.poolId)S.pool=S.pool.filter(x=>x.id!==t.poolId);
+  if(t.poolId)S.pool=S.pool.filter(x=>x.id!==t.poolId&&!(t.poolIds||[]).includes(x.id));
   let moved=null;if(t.replaceId){moved=S.events.find(x=>x.id===t.replaceId);S.events=S.events.filter(x=>x.id!==t.replaceId);}
   botSay('캘린더에 넣었어! '+o.slots.map(s=>dayLabel(s.date)+' '+s.start).join(', ')+(t.type==='workout'?'':' 끝나면 체크해줘.'));
   if(ui.queue&&ui.queue.length){const nx=ui.queue.shift();ui.prop=null;openPropFor(nx);return;}
@@ -1985,6 +2146,7 @@ async function pickGeminiModel(key){
   }catch(e){if(e&&(e.code==='bad_key'||e.code==='billing'))throw e;}
   return G_FALLBACK[0];
 }
+let geminiLastSources=[];
 function geminiSampler(key){
   // 여러 모델에 시차를 두고 동시에 물어보고, 제일 먼저 온 답을 씀 (서버가 붐벼도 빨리 받으려고)
   const one=async(model,body,ac)=>{
@@ -1993,9 +2155,11 @@ function geminiSampler(key){
     if(r.status===400&&body.generationConfig.thinkingConfig&&/think/i.test(JSON.stringify(j))){const b2=JSON.parse(JSON.stringify(body));delete b2.generationConfig.thinkingConfig;return one(model,b2,ac);}
     if(r.status===404)throw {code:'model',status:404,message:'모델 없음'};
     if(!r.ok){const msg=(j.error&&j.error.message)||('오류 '+r.status);throw {code:geminiErrCode(r.status,msg),status:r.status,message:msg};}
-    return ((((j.candidates||[])[0]||{}).content||{}).parts||[]).map(p=>p.text||'').join('');
+    const cand=(j.candidates||[])[0]||{};
+    if(body.tools){const gm=cand.groundingMetadata||{};geminiLastSources=(gm.groundingChunks||[]).map(c=>c.web).filter(w=>w&&w.uri).map(w=>({title:w.title||w.uri,uri:w.uri}));}
+    return ((cand.content||{}).parts||[]).map(p=>p.text||'').join('');
   };
-  const call=async(prompt,json)=>{
+  const call=async(prompt,json,search)=>{
     let list=[];try{list=JSON.parse(lsGet('dovis-gemini-models')||'[]');}catch(x){}
     let model=lsGet(GMODEL);
     if(!list.length||!model){model=await pickGeminiModel(key);lsSet(GMODEL,model);try{list=JSON.parse(lsGet('dovis-gemini-models')||'[]');}catch(x){}}
@@ -2006,6 +2170,7 @@ function geminiSampler(key){
     if(!models.length){const t=Math.min(...Object.values(cool).filter(v=>v>now));throw {code:'rate_limited',message:'모든 모델의 무료 사용량을 다 썼어. '+coolText(t)};}
     const body={contents:[{role:'user',parts:[{text:typeof prompt==='string'?prompt:prompt.map(m=>m.content).join('\n')}]}],generationConfig:{temperature:0.4}};
     if(json)body.generationConfig.responseMimeType='application/json';
+    if(search)body.tools=[{google_search:{}}];
     body.generationConfig.thinkingConfig={thinkingBudget:0};
     return await new Promise((resolve,reject)=>{
       const acs=[];let done=false,started=0,running=0,lastErr=null;const timers=[];
@@ -2033,6 +2198,7 @@ function geminiSampler(key){
     });
   };
   const f=async(prompt,opts)=>({text:await call(prompt,false)});
+  f.search=async(prompt)=>{geminiLastSources=[];const t=await call(prompt,false,true);return {text:t,sources:geminiLastSources.slice(0,5),searched:true};};
   f.json=async(prompt,opts)=>{const t=await call(prompt,true);const c=t.replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();try{return JSON.parse(c);}catch(e){const m=c.match(/\{[\s\S]*\}/);if(m)return JSON.parse(m[0]);throw {code:'parse',message:'AI 답을 못 읽었어'};}};
   f.provider='gemini';
   return f;
@@ -2204,32 +2370,67 @@ function buildPrompt(text){
   const recent=S.chat.slice(-7,-1).map(m=>(m.who==='me'?'사용자: ':'DOVIS: ')+m.text).join('\n');
   return '너는 DOVIS, 사용자의 AI 일정 비서야. 반말로 밝고 친한 친구처럼, 짧고 구체적으로 말해.\n'+
   '지금: '+n.date+'('+DAYS[dow(n.date)]+') '+hm(n.min)+'\n'+
-  '규칙: 과외·학원 끝난 뒤엔 일정 넣지 않음'+(S.settings.rules.noAfterWork?'(켜짐)':'(꺼짐)')+'. 과제는 되도록 한 번에. 모든 배치는 사용자 승인 후 확정. 기상은 첫 일정 2시간 전, 수면 7시간 반. 평일엔 학교 옆 헬스장에서 운동(집 가기 직전).'+((S.rules||[]).length?' 사용자 추가한 규칙: '+(S.rules||[]).map(r=>'"'+r.text+'"('+(r.on?'켜짐':'꺼짐')+') #'+r.id).join(', ')+'.':'')+'\n'+
+  '규칙: 과외·학원 끝난 뒤엔 일정 넣지 않음'+(S.settings.rules.noAfterWork?'(켜짐)':'(꺼짐)')+'. 과제는 되도록 한 번에. 모든 배치는 사용자 승인 후 확정. 기상은 첫 일정 2시간 전, 수면 7시간 반. 평일엔 학교 옆 헬스장에서 운동(집 가기 직전).'+((S.rules||[]).length?' 사용자가 추가한 규칙: '+(S.rules||[]).map(r=>'"'+r.text+'"('+(r.on?'켜짐':'꺼짐')+') #'+r.id).join(', ')+'.':'')+'\n'+
   '앞으로 일정과 빈 시간(이동 시간·규칙 반영):\n'+scheduleSummary(/다음\s*주|다다음|\d+일|\d+\/\d+/.test(text)?14:7)+'\n'+
   '체크용 할 일(시간표에 없음): '+(todos().filter(t=>!t.done).map(t=>t.title+' ~'+t.due+(t.note?' ('+t.note+')':'')).join('; ')||'없음')+'\n'+
-  '배치 안 된 할 일: '+(S.pool.map(p=>p.title+' '+p.durationMin+'분 마감 '+p.deadline).join('; ')||'없음')+'\n'+
+  '배치 안 된 할 일: '+(S.pool.map(p=>p.title+' '+p.durationMin+'분 마감 '+p.deadline+' #'+p.id).join('; ')||'없음')+'\n'+
   (recent?'최근 대화:\n'+recent+'\n':'')+
   '사용자의 새 메시지: "'+text+'"\n\n'+
   '다음 형식의 JSON 객체 하나만 출력해:\n'+
-  '{"action":"add_task"|"add_event"|"block_time"|"change"|"add_rule"|"remove_rule"|"add_todo"|"answer","reply":"사용자에게 할 말(반말, 2~4문장)","changes":[{"op":"cancel|restore|delete|edit","id":"#뒤의 id 그대로","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","title":"","cat":"class|drum|work|friend|etc"}],"task":{"from":"YYYY-MM-DD(이날부터 넣고 싶으면, 없으면 빈칸)","title":"","durationMin":0,"deadline":"YYYY-MM-DD","type":"study|practice|workout|etc","allowSplit":true},"todo":{"title":"","due":"YYYY-MM-DD"},"rule":{"text":"규칙 한 줄 요약","block":null,"buffer":null,"id":"지울 규칙 #뒤 id"},"event":{"title":"","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","cat":"class|drum|work|friend|etc","toGoogle":false,"allDay":false,"tbd":false}}\n'+
+  '{"action":"add_task"|"add_event"|"block_time"|"change"|"add_rule"|"remove_rule"|"add_todo"|"remind"|"cat_color"|"research"|"answer","reply":"사용자에게 할 말(반말, 2~4문장)","changes":[{"op":"cancel|restore|delete|edit","id":"#뒤의 id 그대로","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","endDate":"1박 이상이면 끝나는 날","color":"색을 바꿀 때만 #hex","title":"","cat":"class|drum|work|friend|etc"}],"task":{"date":"정확한 날(시간을 콕 집었을 때만)","start":"HH:MM","end":"HH:MM","poolIds":["배치 안 된 할 일 # 뒤 id들(합치거나 그걸 넣는 거면)"],"from":"YYYY-MM-DD(이날부터 넣고 싶으면, 없으면 빈칸)","title":"","durationMin":0,"deadline":"YYYY-MM-DD","type":"study|practice|workout|etc","allowSplit":true},"todo":{"title":"","due":"YYYY-MM-DD"},"catColor":{"cat":"class|drum|work|friend|etc","color":"#hex"},"research":{"query":"검색할 질문"},"remind":{"date":"YYYY-MM-DD","time":"HH:MM 또는 빈칸","text":"알림에 뜰 말(반말, 짧고 힘 있게)"},"rule":{"text":"규칙 한 줄 요약","block":null,"buffer":null,"id":"지울 규칙 #뒤 id"},"event":{"title":"","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","cat":"class|drum|work|friend|etc","toGoogle":false,"endDate":"1박 이상이면 끝나는 날 YYYY-MM-DD(end는 그날 끝나는 시각), 아니면 빈칸","allDay":false,"tbd":false}}\n'+
   '- 해야 할 일·과제·연습처럼 시간을 찾아 넣어야 하면 add_task. 걸리는 시간을 말 안 했으면 합리적으로 추정하고 reply에 추정했다고 말해. 마감을 말 안 했으면 7일 뒤.\n'+
   '- 날짜와 시간이 정해진 약속·수업·일정이면 add_event. 시간을 모르면 tbd true, 하루 종일이면 allDay true.\n'+
   '- title에는 일정 이름만 짧게 넣어(예: "동집 약속"). 색·종류·이유 같은 부탁은 title에 넣지 말고 해당 필드로 반영해. cat: 수업 class, 드럼·합주 drum, 과외·학원 work, 친구 약속·모임·개인 약속 friend, 그 밖은 etc. "색 다르게"처럼 구분해달라고 하면 그 성격에 맞는 cat으로 넣고 reply에 어떤 색으로 넣었는지 말해. 기존 일정 색·종류를 바꾸라면 change op "edit"에 cat.\n'+
   '- "항상", "앞으로", "매번", "~할 때는"처럼 앞으로 계속 지킬 방식·조건을 말하면 일정이나 할 일을 만들지 말고 add_rule. rule.text는 규칙을 짧게 요약, 특정 요일·시간대에 넣지 말라는 거면 rule.block={"days":[월=0…일=6],"start":"HH:MM","end":"HH:MM"}, 어떤 할 일을 다른 일정 직후에 잡을 때 이동·여유 시간을 두라는 거면 rule.buffer={"types":["practice"(드럼·연습)|"study"(과제·공부)|"workout"(운동)|"etc"|"all"],"min":분}. 앱이 못 따르는 규칙이면 둘 다 null로 두고 reply에 대화·조언에만 반영한다고 말해.\n'+
   '- 시간을 따로 잡을 필요 없는 짧은 일(강의 틀어놓기, 제출, 신청, 연락, 챙기기 등)이나 "할 일에 넣어줘"라고 하면 add_todo. todo.title은 짧게, todo.due는 그날까지(말 안 했으면 오늘). 걸리는 시간이 길어서 시간표에 자리가 필요하면 add_task.\n'+
-  '- 구글 캘린더는 사용자 직접 말할 때만: "구글 캘린더에도 넣어줘/보내줘"라고 하면 event.toGoogle=true, 아니면 항상 false.\n'+
-  '- 앱에서 실제로 바뀌는 건 action(change/add_event/add_task/add_todo/add_rule…)을 줬을 때뿐이야. answer로 답하면서 "바꿨어/넣었어/옮겼어"라고 말하면 절대 안 돼. 바꿔달라는 요청이면 꼭 해당 action을 줘(앱이 미리보기를 띄우고 사용자 승인해).\n'+
+  '- 구글 캘린더는 사용자가 직접 말할 때만: "구글 캘린더에도 넣어줘/보내줘"라고 하면 event.toGoogle=true, 아니면 항상 false.\n'+
+  '- 사용자가 시간을 콕 집으면("지금부터 5시까지", "3시부터 2시간") 토 달지 말고 그대로 해. 다른 시간을 제안하거나 "괜찮아?"라고 되묻지 마. "지금"은 '+hm(roundUp5(n.min))+'. 할 일이면 add_task에 task.date/start/end를 넣어. 끝이 안 맞으면 말한 끝 시각을 우선해. reply는 한 문장으로 "OO 넣을게!" 정도만.\n'+
+  '- 배치 안 된 할 일을 넣거나 합치라고 하면 task.poolIds에 그 id들을 넣어(합치면 title도 합친 이름으로).\n'+
+  '- 앱에서 실제로 바뀌는 건 action(change/add_event/add_task/add_todo/add_rule…)을 줬을 때뿐이야. answer로 답하면서 "바꿨어/넣었어/옮겼어"라고 말하면 절대 안 돼. 바꿔달라는 요청이면 꼭 해당 action을 줘(앱이 미리보기를 띄우고 사용자가 승인해).\n'+
+  '- "알려줘/알림 줘/깨워줘/잊지 않게 해줘/꼭 ~해야 해 알림"처럼 정해진 때에 폰 알림으로 콕 찔러달라는 거면 remind. 시간 말 안 했으면 time은 빈칸(그날 아침 기상 시간에 울려). text는 "오늘은 꼭 현사남 정리본 만들어야 해!"처럼 짧고 힘 있게.\n'+
+  '- 일정을 넣어달라는 게 아니라 건강·안전·공부·생활 지식을 묻거나 "어떻게 생각해/괜찮아?/해도 돼?/왜?"처럼 의견이나 사실을 물으면(일정 얘기가 섞여 있어도) 일정 추가로 착각하지 말고 research. reply는 비워둬도 돼(앱이 검색해서 답해).\n'+
+  '- 색 바꾸기: 쓸 수 있는 색은 파랑 #3B5BDB, 보라 #6741D9, 분홍 #D6336C, 주황 #C2410C, 귤색 #E8590C, 초록 #2B8A3E, 청록 #0B7285, 회색 #495057. 특정 일정 색이면 change op "edit"에 color만(종류 cat은 바꾸지 마), "드럼 일정 전부"처럼 종류 전체면 cat_color.\n'+
   '- 기존 규칙을 지우거나 그만하라고 하면 remove_rule, rule.id에 위 규칙의 # 뒤 id를 그대로.\n'+
   '- 특정 시간을 비워달라고 하면 block_time (event 필드에 그 시간, title은 "비워두기"나 이유).\n'+
   '- 기존 일정을 휴강·취소하면 change에 op "cancel", 되돌리면 "restore", 지우면 "delete", 날짜·시간·이름을 바꾸면 "edit"(바꿀 값만 채우기). id는 위 일정 목록의 # 뒤 값을 정확히 복사. 여러 개면 changes에 여러 개.\n'+
-  '- DOVIS 앱은 일정 추가·수정·휴강·삭제를 전부 할 수 있어. "직접 못 바꾼다"고 말하지 마. 바꾸기 전에 앱이 미리보기를 보여주고 사용자 승인해.\n'+
+  '- DOVIS 앱은 일정 추가·수정·휴강·삭제를 전부 할 수 있어. "직접 못 바꾼다"고 말하지 마. 바꾸기 전에 앱이 미리보기를 보여주고 사용자가 승인해.\n'+
   '- 최근 대화에 없는 내용을 "이미 말해줬지"처럼 지어내지 마.\n'+
   '- 그 밖의 질문(빈 시간, 조언, 일정 확인 등)은 answer. 위 데이터만 근거로 정확하게 답해. 날짜는 "11/12(목)"처럼 써.\n'+
   '- 확정은 앱이 미리보기로 보여준 뒤 사용자가 승인해. reply에서 이미 넣었다고 말하지 마.';
 }
+async function doResearch(q,text){
+  // 일정과 상관없는 질문(건강·지식 등): 구글 검색으로 근거 찾아서 답하기
+  ui.busy=true;ui.scrollBottom=true;render();
+  const n=nowInfo();
+  const today=eventsOn(n.date).filter(e=>isTimed(e)&&e.state!=='off').map(e=>e.start+' '+(e.short||e.title)).join(', ');
+  const prompt='너는 DOVIS, 사용자의 비서야. 아래 질문에 대해 믿을 만한 자료(공공기관·학회·병원·공식 안내)를 찾아보고 정확하게 답해줘.\n'+
+    '답변 형식: 반말, 밝고 친근하게. 첫 줄에 결론 한 문장. 그다음 근거를 2~4개 항목(•)으로, 숫자·기준(몇 시간, 며칠 등)이 있으면 꼭 넣어. 어디서 나온 기준인지(예: 대한적십자사) 짧게 밝혀. '+
+    '사용자 일정과 관련 있으면 마지막에 일정 기준으로 어떻게 하면 좋을지 한 줄 제안. 건강 문제면 "몸 상태 이상하면 전문가한테 물어봐" 한 줄. 모르는 건 지어내지 마.\n'+
+    '오늘('+n.date+') 일정: '+(today||'없음')+'\n질문: '+text;
+  let out=null,note='';
+  try{
+    const sample=await getSample();if(!sample)throw {code:'none'};
+    if(sample.search){try{out=await sample.search(prompt);}catch(e){if(e&&(e.code==='bad_key'||e.code==='billing'))throw e;out=null;}}
+    if(!out){const r=await sample(prompt);out={text:r.text||'',sources:[],searched:false};note='\n(검색은 못 하고 알고 있는 걸로 답했어. 중요한 건 한 번 더 확인해줘)';}
+    ui.aiLast={ok:true,at:Date.now()};
+  }catch(e){ui.busy=false;botSay('지금 AI가 응답을 못 해서 찾아보지 못했어. 조금 있다가 다시 물어봐줘!');ui.scrollBottom=true;commit();return;}
+  ui.busy=false;
+  const m={id:'m'+uid(),who:'bot',text:String(out.text||'').trim()+note};
+  if(out.sources&&out.sources.length)m.sources=out.sources;
+  S.chat.push(m);if(S.chat.length>60)S.chat=S.chat.slice(-60);ui.scrollBottom=true;commit();
+}
 function applyAI(res,text){
   if(!res||typeof res!=='object'){botSay('음, 잘 못 알아들었어. 다시 한 번 말해줄래?');ui.scrollBottom=true;commit();return;}
   const reply=res.reply||'';
+  if(res.action==='research'){doResearch((res.research&&res.research.query)||text,text);return;}
+  if(res.action==='cat_color'&&res.catColor&&CATS[res.catColor.cat]&&/^#[0-9a-fA-F]{6}$/.test(res.catColor.color||'')){
+    ui.prop={catColor:{cat:res.catColor.cat,color:res.catColor.color,from:catColor(res.catColor.cat)}};botSay(reply||CATS[res.catColor.cat]+' 색 바꿔볼게. 이렇게 할까?');ui.scrollBottom=true;commit();return;
+  }
+  if(res.action==='remind'&&res.remind&&res.remind.text){
+    const x=addNudge(res.remind.date,res.remind.time,res.remind.text);
+    botSay('알림 맞춰놨어 ⏰ '+dayLabel(x.date)+' '+x.time+'\n"'+x.text+'"'+(NATIVE?'':'\n(폰 알림은 안드로이드 앱에서 울려. 여기선 그날 DOVIS 한마디에 보여줄게)'));
+    ui.scrollBottom=true;commit();return;
+  }
   if(res.action==='add_todo'&&res.todo&&res.todo.title){
     const due=/^\d{4}-\d{2}-\d{2}$/.test(res.todo.due||'')?res.todo.due:nowInfo().date;const t=addTodo(res.todo.title,due);
     botSay((reply?reply+'\n':'')+'할 일에 넣었어: "'+t.title+'" ('+dayLabel(due)+'까지). 하루 탭에서 체크하면 돼!');ui.scrollBottom=true;commit();return;
@@ -2244,7 +2445,16 @@ function applyAI(res,text){
   if(res.action==='add_task'&&res.task&&res.task.durationMin>0){
     const t=res.task;const n=nowInfo();
     const task={title:String(t.title||'할 일').slice(0,30),durationMin:Math.max(15,Math.min(600,Math.round(t.durationMin/15)*15)),deadline:/^\d{4}-\d{2}-\d{2}$/.test(t.deadline||'')&&t.deadline>=n.date?t.deadline:addDays(n.date,7),type:TYPES[t.type]?t.type:'study',allowSplit:t.allowSplit!==false};
+    const okT=/^\d{2}:\d{2}$/;
+    const pids=Array.isArray(t.poolIds)?t.poolIds.map(x=>String(x).replace(/^#/,'')).filter(id=>(S.pool||[]).some(p=>p.id===id)):[];
+    if(/^\d{4}-\d{2}-\d{2}$/.test(t.date||'')&&t.date>=n.date&&okT.test(t.start||'')&&okT.test(t.end||'')&&t.end>t.start){
+      // 시간을 콕 집었으면 그대로 넣기 (다른 시간 제안 안 함)
+      const first=pids.length?S.pool.find(p=>p.id===pids[0]):null;
+      const ev={title:task.title,date:t.date,start:t.start,end:t.end,cat:'etc',allDay:false,tbd:false,place:TYPE_PLACE[task.type]||'school',asTask:{type:first&&first.type||task.type,deadline:task.deadline<t.date?t.date:task.deadline,poolIds:pids}};
+      botSay(reply||'"'+task.title+'" '+(t.date===n.date?'오늘':dayLabel(t.date))+' '+t.start+'–'+t.end+'에 넣을게!');ui.prop={event:ev};ui.scrollBottom=true;commit();return;
+    }
     if(/^\d{4}-\d{2}-\d{2}$/.test(t.from||'')&&t.from>=n.date){task.from=t.from;if(task.deadline<t.from)task.deadline=t.from;}
+    if(pids.length&&!task.poolId){task.poolId=pids[0];task.poolIds=pids;}
     const key=x=>String(x).replace(/[\s()①②③]/g,'');const pm=(S.pool||[]).find(p=>key(p.title).includes(key(task.title))||key(task.title).includes(key(p.title)));
     if(pm){task.poolId=pm.id;task.title=pm.title;task.type=pm.type||task.type;if(!t.durationMin)task.durationMin=pm.durationMin;}
     openPropFor(task,reply||null);return;
@@ -2257,7 +2467,9 @@ function applyAI(res,text){
     const e=res.event;
     const ev={title:String(e.title||(res.action==='block_time'?'비워두기':'일정')).slice(0,30),date:e.date,start:e.allDay||e.tbd?null:e.start,end:e.allDay||e.tbd?null:e.end,cat:CATS[e.cat]?e.cat:'etc',allDay:!!e.allDay,tbd:!!e.tbd,place:'other'};
     if(e.toGoogle===true||/구글|google/i.test(text||''))ev.gpush=true;
-    if(!ev.allDay&&!ev.tbd&&!(/^\d{2}:\d{2}$/.test(ev.start||'')&&/^\d{2}:\d{2}$/.test(ev.end||'')&&ev.end>ev.start)){ev.tbd=true;ev.start=ev.end=null;}
+    if(/^\d{4}-\d{2}-\d{2}$/.test(e.endDate||'')&&e.endDate>ev.date&&/^\d{2}:\d{2}$/.test(e.start||'')&&/^\d{2}:\d{2}$/.test(e.end||'')){ev.endDate=e.endDate;ev.start=e.start;ev.end=e.end;ev.allDay=false;ev.tbd=false;}
+    if(!ev.endDate&&!ev.allDay&&!ev.tbd&&/^\d{2}:\d{2}$/.test(ev.start||'')&&/^\d{2}:\d{2}$/.test(ev.end||'')&&ev.end<=ev.start){ev.endDate=addDays(ev.date,1);}
+    if(!ev.endDate&&!ev.allDay&&!ev.tbd&&!(/^\d{2}:\d{2}$/.test(ev.start||'')&&/^\d{2}:\d{2}$/.test(ev.end||'')&&ev.end>ev.start)){ev.tbd=true;ev.start=ev.end=null;}
     if(reply)botSay(reply);
     ui.prop={event:ev};ui.scrollBottom=true;commit();return;
   }
@@ -2275,11 +2487,14 @@ function normChange(c){
   const okD=/^\d{4}-\d{2}-\d{2}$/,okT=/^\d{2}:\d{2}$/;
   const out={op:c.op,ev};
   if(c.op==='edit'){
-    out.date=okD.test(c.date||'')?c.date:ev.date;out.start=okT.test(c.start||'')?c.start:ev.start;out.end=okT.test(c.end||'')?c.end:ev.end;
-    out.title=c.title?String(c.title).slice(0,30):ev.title;
+    const raw=S.events.find(x=>x.id===ev.id)||ev;
+    out.date=okD.test(c.date||'')?c.date:raw.date;out.start=okT.test(c.start||'')?c.start:raw.start;out.end=okT.test(c.end||'')?c.end:raw.end;
+    out.title=c.title?String(c.title).slice(0,30):raw.title;
+    if(okD.test(c.endDate||'')&&c.endDate>out.date&&ev.kind==='fixed'&&!ev.recurring)out.endDate=c.endDate;else if(raw.endDate&&!c.date)out.endDate=raw.endDate;
     out.cat=CATS[c.cat]&&ev.kind!=='task'?c.cat:ev.cat;
-    if(out.start&&out.end&&!(out.end>out.start))return null;
-    out.text=(isTimed(ev)?ev.start+'–'+ev.end:'')+' → '+(out.date!==ev.date?dayLabel(out.date)+' ':'')+(out.start?out.start+'–'+out.end:'')+(out.title!==ev.title?' · '+out.title:'')+(out.cat!==ev.cat?' · 색: '+CATS[out.cat]:'');
+    if(/^#[0-9a-fA-F]{6}$/.test(c.color||'')){out.color=c.color;out.colorFrom=evColor(ev);}
+    if(out.start&&out.end&&!out.endDate&&!(out.end>out.start))return null;
+    out.text=(isTimed(ev)?ev.start+'–'+ev.end:'')+' → '+(out.date!==ev.date?dayLabel(out.date)+' ':'')+(out.start?out.start+'–'+out.end:'')+(out.title!==ev.title?' · '+out.title:'')+(out.cat!==ev.cat?' · 종류: '+CATS[out.cat]:'')+(out.color?' · 색 바꿈':'');
   }else if(c.op==='cancel')out.text=(isTimed(ev)?ev.start+'–'+ev.end+' ':'')+(ev.kind==='task'?'→ 삭제':'→ 휴강·취소');
   else if(c.op==='restore')out.text=(isTimed(ev)?ev.start+'–'+ev.end+' ':'')+'→ 원래대로';
   else if(c.op==='delete')out.text=(isTimed(ev)?ev.start+'–'+ev.end+' ':'')+(ev.recurring?'→ 이날만 휴강':'→ 삭제');
@@ -2289,6 +2504,7 @@ function normChange(c){
 function applyChange(c){
   const e=c.ev;
   if(e.recurring){
+    if(c.op==='edit'&&c.color&&c.date===e.date&&c.start===e.start&&c.end===e.end&&c.title===e.title){const fx=S.fixed.find(x=>x.id===e.fid);if(fx)fx.color=c.color;return;}
     const key=e.date+':'+e.fid;const l=S.skips[e.date]=S.skips[e.date]||[];
     if(c.op==='restore'){const i=l.indexOf(e.fid);if(i>=0)l.splice(i,1);if(e.mode!=='fixed')S.confirm[key]='on';return;}
     if(!l.includes(e.fid))l.push(e.fid);
@@ -2300,7 +2516,7 @@ function applyChange(c){
   if(c.op==='delete'||(c.op==='cancel'&&x.kind==='task')){S.events=S.events.filter(y=>y.id!==x.id);return;}
   if(c.op==='cancel'){x.cancelled=true;return;}
   if(c.op==='restore'){x.cancelled=false;return;}
-  if(c.op==='edit'){if(c.title!==x.title){x.title=c.title;x.short=c.title.slice(0,8);}if(c.cat)x.cat=c.cat;x.date=c.date;if(c.start){x.start=c.start;x.end=c.end;x.tbd=false;x.allDay=false;}}
+  if(c.op==='edit'){if(c.title!==x.title){x.title=c.title;x.short=c.title.slice(0,8);}if(c.cat)x.cat=c.cat;if(c.color)x.color=c.color;x.date=c.date;if(c.endDate&&c.endDate>c.date)x.endDate=c.endDate;else if(c.endDate==='')delete x.endDate;if(c.start){x.start=c.start;x.end=c.end;x.tbd=false;x.allDay=false;}}
 }
 function reflowSuggestions(dates){
   const n=nowInfo();const out=[];const temp=[];
@@ -2377,7 +2593,7 @@ document.addEventListener('click',ev=>{
     case 'aiDay':aiDayAdvice(el.dataset.d);break;
     case 'wk':ui.week=el.dataset.n==='0'?weekStart(n.date):addDays(ui.week,+el.dataset.n);render();break;
     case 'gotoday':ui.date=el.dataset.d;ui.tab='today';ui.todayMode='day';render();break;
-    case 'open':ui.sheet={id:el.dataset.id,date:el.dataset.date,step:null};render();break;
+    case 'open':ui.sheet={id:el.dataset.id,date:el.dataset.date,step:null};ui.sheetClash=null;render();break;
     case 'openPost':ui.sheet={id:el.dataset.id,date:el.dataset.date,step:'postpone'};render();break;
     case 'closeSheet':ui.sheet=null;render();break;
     case 'checkfirst':{const p=pendingChecks()[0];if(p){ui.sheet={id:p.id,date:p.date,step:null};render();}break;}
@@ -2416,12 +2632,27 @@ document.addEventListener('click',ev=>{
     case 'nextOpt':ui.prop.idx=(ui.prop.idx+1)%ui.prop.options.length;render();break;
     case 'useSplit':ui.prop.options.push(ui.prop.split);ui.prop.idx=ui.prop.options.length-1;ui.prop.split=null;render();break;
     case 'cancelProp':ui.prop=null;ui.queue=null;botSay('알겠어, 안 넣을게.');commit();break;
-    case 'applyChanges':{const cs=ui.prop.changes;cs.forEach(applyChange);ui.prop=null;afterChange(cs.flatMap(c=>[c.ev.date,c.date]));botSay(cs.length+'개 바꿨어! '+cs.map(c=>md(c.ev.date)+' '+(c.ev.short||c.ev.title)).join(', '));ui.scrollBottom=true;commit();break;}
+    case 'applyChanges':{const cs=ui.prop.changes;cs.forEach(applyChange);ui.prop=null;afterChange(cs.flatMap(c=>[c.ev.date,c.date]));const done=cs.length+'개 바꿨어! '+cs.map(c=>md(c.ev.date)+' '+(c.ev.short||c.ev.title)).join(', ');
+      const cc=cs.find(c=>c.color);
+      if(cc){const ids=new Set(cs.map(c=>c.ev.id||c.ev.uid));const fids=new Set(cs.map(c=>c.ev.fid).filter(Boolean));const cl=colorClashes(cc.color,e=>ids.has(e.id)||ids.has(e.uid)||(e.fid&&fids.has(e.fid)));if(cl.length)clashPropose(cc.color,cl,done);else botSay(done);}
+      else botSay(done);
+      ui.scrollBottom=true;commit();break;}
+    case 'clashFix':{const C=ui.prop&&ui.prop.clash||ui.sheetClash;const col=el.dataset.c;if(!C)break;
+      C.items.forEach(it=>{if(it.recurring){const fx=S.fixed.find(x=>x.id===it.fid);if(fx)fx.color=col;}else{S.events.filter(x=>x.id===it.id||x.title===it.title).forEach(x=>{x.color=col;});}});
+      const msg=C.items.map(i=>i.title).join(', ')+' '+(colorName(col)||'')+'색으로 바꿨어!';
+      if(ui.prop&&ui.prop.clash){ui.prop=null;botSay(msg);ui.scrollBottom=true;}else{ui.sheetClash=null;showToast(msg);}commit();break;}
+    case 'clashSkip':{if(ui.prop&&ui.prop.clash){ui.prop=null;botSay('알겠어, 그대로 둘게.');}ui.sheetClash=null;commit();break;}
+    case 'catColorOk':{const P=ui.prop.catColor;S.catColors=S.catColors||{};S.catColors[P.cat]=P.color;ui.prop=null;
+      const cl=colorClashes(P.color,e=>e.cat===P.cat&&!e.color&&e.kind!=='task');
+      const done=CATS[P.cat]+' 색을 '+(colorName(P.color)||'새 색')+'으로 바꿨어!';if(cl.length)clashPropose(P.color,cl,done);else botSay(done);ui.scrollBottom=true;commit();break;}
     case 'delRuleOk':{const id=ui.prop.ruleDel;const r=(S.rules||[]).find(x=>x.id===id);S.rules=(S.rules||[]).filter(x=>x.id!==id);ui.prop=null;afterChange([...Array(7)].map((_,i)=>addDays(n.date,i)));botSay('지웠어! '+(r?'"'+r.text+'" 규칙은 이제 안 지켜.':''));ui.scrollBottom=true;commit();break;}
     case 'lateOk':{const L=ui.prop&&ui.prop.late;if(!L||!L.nd)break;const t=Object.assign({},L.task,{deadline:L.nd});if(t.poolId){const pp=S.pool.find(x=>x.id===t.poolId);if(pp)pp.deadline=L.nd;}ui.prop=null;botSay('좋아, '+(L.nd===n.date?'오늘':dayLabel(L.nd))+'까지로 바꿨어. 자리 찾아볼게!');openPropFor(t);break;}
     case 'lateCancel':{const L=ui.prop&&ui.prop.late;if(!L)break;if(L.task.poolId)S.pool=S.pool.filter(x=>x.id!==L.task.poolId);ui.prop=null;botSay('"'+L.task.title+'" 취소했어.');ui.scrollBottom=true;commit();break;}
     case 'approveRule':{const r=ui.prop.rule;const rr=saveRule(r.text,r);ui.prop=null;botSay('규칙 추가했어! '+(rr.block||rr.buffer?ruleDesc(rr).replace('적용: ','')+'. 앞으로 배치할 때 이렇게 할게.':'대화랑 조언에 반영할게.'));ui.scrollBottom=true;commit();break;}
-    case 'approveEvent':{const e=ui.prop.event;S.events.push(Object.assign({id:'e'+uid(),kind:'fixed',short:e.title.slice(0,8)},e));ui.prop=null;botSay('추가했어! '+dayLabel(e.date)+' '+(e.allDay?'하루 종일':e.tbd?'시간 미정':e.start+'–'+e.end)+' '+e.title+(e.gpush?' · 구글 캘린더에도 보낼게':''));ui.scrollBottom=true;commit();if(e.gpush)gcalSync();break;}
+    case 'approveEvent':{const e=ui.prop.event;
+      if(e.asTask){const a=e.asTask;S.events.push({id:'t'+uid(),kind:'task',status:'scheduled',title:e.title,short:e.title.slice(0,8),date:e.date,start:e.start,end:e.end,type:a.type||'study',deadline:a.deadline||e.date,place:e.place||'school',cat:a.type==='practice'?'drum':'class'});
+        if(a.poolIds&&a.poolIds.length)S.pool=S.pool.filter(p=>!a.poolIds.includes(p.id));ui.prop=null;botSay('넣었어! '+dayLabel(e.date)+' '+e.start+'–'+e.end+' '+e.title);afterChange([e.date]);ui.scrollBottom=true;commit();break;}
+      S.events.push(Object.assign({id:'e'+uid(),kind:'fixed',short:e.title.slice(0,8)},e));ui.prop=null;afterChange([e.date,e.endDate].filter(Boolean));botSay('추가했어! '+evSpanText(e)+' '+e.title+(e.gpush?' · 구글 캘린더에도 보낼게':''));ui.scrollBottom=true;commit();if(e.gpush)gcalSync();break;}
     case 'placePool':{const p=S.pool.find(x=>x.id===el.dataset.id);if(p){ui.form=false;openPropFor(Object.assign({},p,{poolId:p.id}));}break;}
     case 'delPool':S.pool=S.pool.filter(x=>x.id!==el.dataset.id);commit();break;
     case 'quick':handleChat(el.dataset.v,true);break;
@@ -2440,15 +2671,24 @@ document.addEventListener('click',ev=>{
     case 'closeDialog':ui.dialog=null;render();break;
     case 'gAllow':{const g=gState();g.allowRead=true;g.on=true;commit({silent:true,noSync:true});if(NATIVE)nCall('requestCalendar');startGImport();showToast('좋아! 새 일정 생기면 불러올지 물어볼게');render();break;}
     case 'gDeny':{const g=gState();g.askedRead=true;commit({silent:true,noSync:true});showToast('알겠어. 구글 캘린더는 안 볼게');render();break;}
+    case 'setTog':{const k=el.dataset.k;S.settings[k]=S.settings[k]===false;commit({silent:true});if(k==='weather'&&S.settings.weather)weatherRefresh(true);render();break;}
+    case 'nudgeDel':{S.nudges=nudges().filter(x=>x.id!==el.dataset.id);commit({silent:true});showToast('알림 지웠어');break;}
     case 'gReadToggle':{const g=gState();g.allowRead=!g.allowRead;g.askedRead=true;if(!g.allowRead){stopGImport();g.pending=[];}else{if(NATIVE)nCall('requestCalendar');startGImport();}commit({silent:true,noSync:true});render();break;}
     case 'gpAdd':{const g=gState();const k=el.dataset.k;const p=g.pending.find(x=>gpKey(x)===k);if(!p)break;const i=el.dataset.i;
-      const si=document.getElementById('gps'+i),ei=document.getElementById('gpe'+i);const st=si?si.value:'',en=ei?ei.value:'';
-      if((st&&!en)||(!st&&en)||(st&&en&&en<=st)){showToast('시작이랑 끝 시간을 다시 봐줘');break;}
-      const ev={id:'e'+uid(),date:p.date,start:st||null,end:en||null,title:p.title,short:p.title.slice(0,6),cat:'etc',place:'other',kind:'fixed',gid:p.gid,grecur:!!p.grecur};
-      if(!st)ev.allDay=true;S.events.push(ev);
+      const si=document.getElementById('gps'+i),ei=document.getElementById('gpe'+i);let st=si?si.value:'',en=ei?ei.value:'';
+      const full=el.dataset.full==='1'||(!st&&!en);if(full){st='08:00';en='22:00';}
+      if((st&&!en)||(!st&&en)||(st&&en&&en<=st&&!p.endDate)){showToast('시작이랑 끝 시간을 다시 봐줘');break;}
+      const ev={id:'e'+uid(),date:p.date,start:st,end:en,title:p.title,short:p.title.slice(0,6),cat:'etc',place:'other',kind:'fixed',gid:p.gid,grecur:!!p.grecur};
+      if(full)ev.fullDay=true;else if(p.endDate&&p.endDate>p.date)ev.endDate=p.endDate;S.events.push(ev);
       (S.gseen||(S.gseen={}))[k]=1;g.pending=g.pending.filter(x=>gpKey(x)!==k);
-      afterChange([p.date]);commit({silent:true,noSync:true});showToast('불러왔어! '+dayLabel(p.date)+' '+(st?st+'–'+en:'종일')+' '+p.title);render();break;}
+      afterChange([p.date]);commit({silent:true,noSync:true});showToast('불러왔어! '+dayLabel(p.date)+' '+(full?'종일(08:00–22:00)':st+'–'+en)+' '+p.title);render();break;}
     case 'gpNo':{const g=gState();const k=el.dataset.k;(S.gseen||(S.gseen={}))[k]=1;g.pending=g.pending.filter(x=>gpKey(x)!==k);commit({silent:true,noSync:true});render();break;}
+    case 'evColor':case 'evLine':{const e=findEv(ui.sheet.id,ui.sheet.date);if(!e)break;
+      const tgt=e.recurring?S.fixed.find(x=>x.id===e.fid):S.events.find(x=>x.id===e.id);if(!tgt)break;
+      if(a==='evColor'){if(el.dataset.c)tgt.color=el.dataset.c;else delete tgt.color;
+        ui.sheetClash=null;if(el.dataset.c){const cl=colorClashes(el.dataset.c,x=>x.id===e.id||(e.fid&&x.fid===e.fid));if(cl.length)ui.sheetClash={color:el.dataset.c,items:cl,opts:freeColors([el.dataset.c])};}}
+      else tgt.line=el.dataset.l;
+      commit();break;}
     case 'gpushToggle':{const e=S.events.find(x=>x.id===el.dataset.id);if(!e)break;e.gpush=!e.gpush;commit({silent:true});showToast(e.gpush?'구글 캘린더에 보낼게':'구글 캘린더에서 뺄게');gcalSync();render();break;}
     case 'fbIn':fbSignIn();break;
     case 'pinW':{const r=nCall('pinWidget',el.dataset.k);showToast(r==='1'?'홈 화면에 추가할지 물어보는 창이 떴을 거야':'이 폰은 바로 추가가 안 돼. 홈 화면 길게 누르기 → 위젯 → DOVIS에서 골라줘');break;}
@@ -2491,7 +2731,8 @@ document.addEventListener('submit',ev=>{
     const val=k=>g[k]?g[k].value:null;
     const title=val('title').trim();if(!title)return;
     const mode=val('mode')||'timed';const st=val('start'),en=val('end');
-    if(mode==='timed'&&!(en>st)){showToast('끝나는 시간이 시작보다 늦어야 해');return;}
+    const endDate=val('endDate')||'';const startDate=val('date')||e.date;const multi=endDate&&endDate>startDate;
+    if(mode==='timed'&&!multi&&!(en>st)){showToast('끝나는 시간이 시작보다 늦어야 해');return;}
     const scope=ev.submitter&&ev.submitter.value;
     if(e.recurring){
       if(scope==='all'){
@@ -2507,17 +2748,25 @@ document.addEventListener('submit',ev=>{
       x.title=title;if(title!==e.title)x.short=title.slice(0,8);
       x.date=val('date')||x.date;x.place=val('place');
       if(x.kind==='task'){x.type=val('type')||x.type;x.deadline=val('deadline')||x.deadline;x.start=st;x.end=en;}
-      else{x.cat=val('cat')||x.cat;x.tbd=mode==='tbd';x.allDay=mode==='allDay';x.start=mode==='timed'?st:null;x.end=mode==='timed'?en:null;}
+      else{x.cat=val('cat')||x.cat;x.tbd=mode==='tbd';x.allDay=mode==='allDay';x.start=mode==='timed'?st:null;x.end=mode==='timed'?en:null;
+        if(mode==='timed'&&multi)x.endDate=endDate;else delete x.endDate;}
       showToast('수정했어');
     }
-    afterChange([e.date,val('date')]);ui.sheet=null;commit();return;
+    afterChange([e.date,val('date'),endDate].filter(Boolean));ui.sheet=null;commit();return;
   }
+  if(f.id==='sheetchat'){const v=g['t'].value.trim();if(!v)return;const e=findEv(ui.sheet.id,ui.sheet.date);ui.sheet=null;
+    const ctxT=e?'(지금 이 일정을 고치려는 거야: #'+e.uid+' '+e.title+' '+e.date+' '+(e.start?e.start+'–'+e.end:'시간 미정')+') ':'';
+    if(layoutMode()!=='wide')ui.tab='dovis';ui.scrollBottom=true;render();handleChat(v,false,ctxT);return;}
   if(f.id==='evform'){
     const mode=g['mode'].value;const title=g['title'].value.trim();if(!title)return;
     const e={id:'e'+uid(),kind:'fixed',title,short:title.slice(0,8),date:g['date'].value,cat:g['cat'].value,place:g['place'].value,start:null,end:null};
-    if(mode==='timed'){if(!(g['end'].value>g['start'].value)){showToast('끝나는 시간이 시작보다 늦어야 해');return;}e.start=g['start'].value;e.end=g['end'].value;}
+    if(mode==='timed'){const st=g['start'].value,en=g['end'].value;let ed=g['endDate']&&g['endDate'].value||'';
+      if(!st||!en){showToast('시작이랑 끝 시간을 넣어줘');return;}
+      if(ed&&ed<e.date){showToast('끝나는 날이 시작 날보다 빨라');return;}
+      if(!ed||ed===e.date){if(en<=st)ed=addDays(e.date,1);else ed='';}   // 밤을 넘기면 다음 날로
+      e.start=st;e.end=en;if(ed)e.endDate=ed;}
     else if(mode==='tbd')e.tbd=true;else e.allDay=true;
-    S.events.push(e);ui.form=false;botSay('추가했어! '+dayLabel(e.date)+' '+(e.allDay?'하루 종일':e.tbd?'시간 미정':e.start+'–'+e.end)+' '+title);ui.scrollBottom=true;commit();
+    S.events.push(e);ui.form=false;afterChange([e.date,e.endDate].filter(Boolean));botSay('추가했어! '+evSpanText(e)+' '+title);ui.scrollBottom=true;commit();
   }
 });
 let memoTimer=null;
@@ -2541,6 +2790,7 @@ initCloud();
 if(STANDALONE&&'serviceWorker' in navigator&&location.protocol==='https:'){try{navigator.serviceWorker.register('./sw.js').catch(()=>{});}catch(e){}}
 setTimeout(()=>{const g=gState();if(g.allowRead)startGImport();if((S.events||[]).some(e=>e.gpush)||Object.keys(g.map).length)gcalSync();},3000);
 if(NATIVE){nCall('requestNotifications');nativeSoon();}
+setTimeout(()=>weatherRefresh(),1200);setInterval(()=>weatherRefresh(),3*3600e3);
 if(FIREBASE_CONFIG)fbLoad().catch(()=>{});
 setTimeout(()=>{const sp=document.getElementById('splash');if(sp&&sp.style&&sp.remove){sp.style.opacity='0';setTimeout(()=>sp.remove(),400);}},700);
 </script>
