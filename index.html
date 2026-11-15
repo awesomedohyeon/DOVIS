@@ -2180,10 +2180,16 @@ function claudeSampler(key){
     const text=typeof prompt==='string'?prompt:prompt.map(m=>m.content).join('\n');
     const ac=typeof AbortController!=='undefined'?new AbortController():null;const tm=setTimeout(()=>{try{ac&&ac.abort();}catch(e){}},25000);
     try{
-      const body={model:CMODEL,max_tokens:maxTok||1500,temperature:0.4,messages:[{role:'user',content:text}]};
+      const body={model:CMODEL,max_tokens:maxTok||1500,messages:[{role:'user',content:text}]};
       if(json)body.system='답은 반드시 JSON 객체 하나만 줘. 설명이나 코드블록 없이 { 로 시작해서 } 로 끝내.';
-      const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify(body),signal:ac?ac.signal:undefined});
-      const j=await r.json().catch(()=>({}));
+      const send=bd=>fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify(bd),signal:ac?ac.signal:undefined});
+      const retry=async bd=>{const r2=await send(bd);const j2=await r2.json().catch(()=>({}));if(!r2.ok)throw {code:claudeErrCode(r2.status,j2),status:r2.status,message:(j2.error&&j2.error.message)||('오류 '+r2.status),prov:'claude'};const u2=j2.usage||{};addUsage('claude',u2.input_tokens,u2.output_tokens);return (j2.content||[]).filter(c=>c.type==='text').map(c=>c.text).join('');};
+      const r=await send(body);
+      let j=await r.json().catch(()=>({}));
+      if(r.status===400&&/deprecated|not supported|unsupported/i.test((j.error&&j.error.message)||'')){
+        // 모델이 안 받는 옵션이면 빼고 한 번 더
+        const m=((j.error&&j.error.message)||'').match(/`(\w+)`/);if(m&&body[m[1]]!==undefined&&!['model','messages','max_tokens'].includes(m[1])){delete body[m[1]];return await retry(body);}
+      }
       if(!r.ok)throw {code:claudeErrCode(r.status,j),status:r.status,message:(j.error&&j.error.message)||('오류 '+r.status),prov:'claude'};
       const u=j.usage||{};addUsage('claude',u.input_tokens,u.output_tokens);
       return (j.content||[]).filter(c=>c.type==='text').map(c=>c.text).join('');
